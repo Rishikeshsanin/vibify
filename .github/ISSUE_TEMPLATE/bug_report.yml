@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible Vibify problem
+title: "[Bug]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Vibify. For security vulnerabilities, use SECURITY.md instead of filing a public issue.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+      placeholder: The guest device fell behind after...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a room
+        2. Join from an iPhone
+        3. Search for...
+        4. Press play
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Which device/role saw the problem?
+      options:
+        - Host
+        - Guest
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: devices
+    attributes:
+      label: Devices and browsers
+      placeholder: Windows 11 Chrome + iPhone Safari
+    validations:
+      required: true
+  - type: textarea
+    id: sync
+    attributes:
+      label: Sync / playback details
+      description: If relevant, include drift values, buffering state, or what you heard.
+      placeholder: Guest showed +940 ms drift and audio jumped every few seconds.
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Screenshots, console output, room conditions, or anything else useful.
