@@ -1,0 +1,15 @@
+{
+  "rules": {
+    "rooms": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.child('hostUid').val() === auth.uid || newData.child('hostUid').val() === auth.uid)",
+        "participants": {
+          "$uid": {
+            ".write": "auth != null && ($uid === auth.uid || root.child('rooms').child($code).child('hostUid').val() === auth.uid)"
+          }
+        }
+      }
+    }
+  }
+}
