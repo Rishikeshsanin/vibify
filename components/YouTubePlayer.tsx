@@ -72,8 +72,16 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
   const trackRef = useRef<Track | undefined>(track);
   const playbackRef = useRef(playback);
   const correctionRef = useRef(0);
+  const commandStartRef = useRef(Date.now());
   const commandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoplayBlockedRef = useRef(onAutoplayBlocked);
+  const readyChangeRef = useRef(onReadyChange);
   const [playerReady, setPlayerReady] = useState(false);
+
+  useEffect(() => {
+    autoplayBlockedRef.current = onAutoplayBlocked;
+    readyChangeRef.current = onReadyChange;
+  }, [onAutoplayBlocked, onReadyChange]);
 
   useImperativeHandle(refHandle, () => ({
     getCurrentTime: () => playerRef.current?.getCurrentTime?.() ?? 0,
@@ -106,7 +114,7 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
         events: {
           onReady: () => {
             setPlayerReady(true);
-            onReadyChange?.(true);
+            readyChangeRef.current?.(true);
             if (trackRef.current) {
               playerRef.current?.cueVideoById({ videoId: trackRef.current.videoId, startSeconds: 0 });
             }
@@ -122,17 +130,18 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
               void updateParticipant(roomCode, uid, { playerState: event.data });
             }
           },
-          onAutoplayBlocked: () => onAutoplayBlocked?.()
+          onAutoplayBlocked: () => autoplayBlockedRef.current?.()
         }
       });
     });
     return () => {
       disposed = true;
       if (commandTimerRef.current) clearTimeout(commandTimerRef.current);
+      readyChangeRef.current?.(false);
       playerRef.current?.destroy?.();
       playerRef.current = null;
     };
-  }, [onAutoplayBlocked, onReadyChange, roomCode, uid]);
+  }, [roomCode, uid]);
 
   useEffect(() => {
     trackRef.current = track;
@@ -143,8 +152,9 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
 
   useEffect(() => {
     playbackRef.current = playback;
+    commandStartRef.current = Date.now();
     const player = playerRef.current;
-    if (!playerReady || !track || !player) return;
+    if (!playerReady || !track?.videoId || !player) return;
     if (commandTimerRef.current) clearTimeout(commandTimerRef.current);
 
     const apply = () => {
@@ -162,29 +172,32 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
     return () => {
       if (commandTimerRef.current) clearTimeout(commandTimerRef.current);
     };
-  }, [playback.version, playback.status, playback.executeAt, playback.position, playerReady, track]);
+  }, [playback.version, playback.status, playback.executeAt, playback.position, playerReady, track?.videoId]);
 
   useEffect(() => {
-    if (!playerReady || !track) return;
+    if (!playerReady || !track?.videoId) return;
     const interval = window.setInterval(() => {
       const player = playerRef.current;
       const state = playbackRef.current;
       if (!player || state.status !== 'playing' || player.getPlayerState() !== 1) return;
+
       const expected = Math.max(0, state.position + Math.max(0, serverNow() - state.executeAt) / 1000);
       const actual = player.getCurrentTime();
       const drift = actual - expected;
       const driftMs = Math.round(drift * 1000);
       void updateParticipant(roomCode, uid, { driftMs, playerState: player.getPlayerState() });
 
-      // Repeated seeking is what made the previous audio prototype break up.
-      // Vibify corrects only obvious drift and applies a cooldown between corrections.
-      if (Math.abs(drift) > 0.85 && Date.now() - correctionRef.current > 5000) {
+      const settling = Date.now() - commandStartRef.current < 8000;
+      const threshold = settling ? 0.3 : 0.5;
+      const cooldown = settling ? 2500 : 6000;
+
+      if (Math.abs(drift) > threshold && Date.now() - correctionRef.current > cooldown) {
         correctionRef.current = Date.now();
         player.seekTo(expected, true);
       }
-    }, 1500);
+    }, 1200);
     return () => clearInterval(interval);
-  }, [playerReady, roomCode, track, uid]);
+  }, [playerReady, roomCode, track?.videoId, uid]);
 
   return <div className="youtube-frame" ref={mountRef} aria-label="YouTube player" />;
 });
