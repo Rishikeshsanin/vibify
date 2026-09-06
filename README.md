@@ -14,22 +14,23 @@ Vibify is a synchronized listening-room web app. A host creates a room, guests j
 
 Vibify never streams audio from the host. Every client loads the same YouTube video directly, while the room shares only tiny playback-state messages (`track`, `playing`, `position`, `executeAt`, `version`). Clients periodically compare the local YouTube player position with the authoritative room timeline and resync only when drift exceeds the configured threshold.
 
-## Required environment variables
+## Production configuration
+
+The Firebase web configuration for the dedicated `vibify-2d7cf` project is public and included as safe defaults in `lib/firebase.ts`. Environment variables can override it if Vibify is moved to another Firebase project later.
+
+The only required secret is:
 
 ```bash
-NEXT_PUBLIC_FIREBASE_API_KEY=
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
-NEXT_PUBLIC_FIREBASE_DATABASE_URL=
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
-NEXT_PUBLIC_FIREBASE_APP_ID=
 YOUTUBE_DATA_API_KEY=
 ```
 
+Store that value in Vercel environment variables. Do not commit it to GitHub.
+
 ## Firebase setup
 
-Enable Anonymous Authentication and create a Realtime Database. Apply the rules in `firebase.database.rules.json` before production use.
+- Anonymous Authentication must be enabled.
+- Realtime Database is hosted in `asia-southeast1` (Singapore).
+- Publish the rules in `firebase.database.rules.json` before production use.
 
 ## Development
 
