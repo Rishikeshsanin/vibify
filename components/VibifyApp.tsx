@@ -1,0 +1,426 @@
+'use client';
+
+import {
+  ArrowLeft,
+  Check,
+  ChevronRight,
+  Copy,
+  Headphones,
+  LoaderCircle,
+  LogOut,
+  Music2,
+  Pause,
+  Play,
+  Plus,
+  Radio,
+  Search,
+  SkipBack,
+  SkipForward,
+  Sparkles,
+  Users,
+  Volume2,
+  X
+} from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { firebaseConfigured } from '@/lib/firebase';
+import {
+  bindServerClock,
+  createRoom,
+  joinRoom,
+  leaveRoom,
+  serverNow,
+  setTrack,
+  subscribeRoom,
+  writePlayback
+} from '@/lib/room';
+import type { Participant, Room, Track } from '@/lib/types';
+import { YouTubePlayer, type YouTubeHandle } from './YouTubePlayer';
+
+type View = 'home' | 'room';
+
+const FALLBACK_TRACKS: Track[] = [
+  {
+    videoId: 'jfKfPfyJRdk',
+    title: 'lofi hip hop radio 📚 beats to relax/study to',
+    channelTitle: 'Lofi Girl',
+    thumbnail: 'https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg'
+  },
+  {
+    videoId: '5qap5aO4i9A',
+    title: 'lofi hip hop radio 🌿 beats to relax/study to',
+    channelTitle: 'Lofi Girl',
+    thumbnail: 'https://i.ytimg.com/vi/5qap5aO4i9A/hqdefault.jpg'
+  }
+];
+
+export function VibifyApp() {
+  const playerRef = useRef<YouTubeHandle>(null);
+  const [view, setView] = useState<View>('home');
+  const [roomCode, setRoomCode] = useState('');
+  const [uid, setUid] = useState('');
+  const [room, setRoom] = useState<Room | null>(null);
+  const [name, setName] = useState('');
+  const [joinCode, setJoinCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<Track[]>([]);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [displayTime, setDisplayTime] = useState(0);
+  const [seekDraft, setSeekDraft] = useState<number | null>(null);
+  const [toast, setToast] = useState('');
+
+  useEffect(() => bindServerClock(), []);
+
+  useEffect(() => {
+    const storedName = localStorage.getItem('vibify-name');
+    if (storedName) setName(storedName);
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('room')?.toUpperCase();
+    if (code) setJoinCode(code);
+  }, []);
+
+  useEffect(() => {
+    if (!roomCode) return;
+    return subscribeRoom(roomCode, nextRoom => {
+      if (!nextRoom) {
+        setError('This room has ended.');
+        setRoom(null);
+        return;
+      }
+      setRoom(nextRoom);
+    });
+  }, [roomCode]);
+
+  useEffect(() => {
+    if (!room?.track) return;
+    const timer = window.setInterval(() => {
+      const d = playerRef.current?.getDuration() ?? 0;
+      if (d > 0) setDuration(d);
+      setDisplayTime(playerRef.current?.getCurrentTime() ?? 0);
+    }, 500);
+    return () => clearInterval(timer);
+  }, [room?.track?.videoId]);
+
+  const me = uid ? room?.participants?.[uid] : undefined;
+  const isHost = Boolean(room && uid && room.hostUid === uid);
+  const participants = useMemo(
+    () => Object.values(room?.participants ?? {}).filter(p => p.online !== false),
+    [room?.participants]
+  );
+  const readyCount = room?.track
+    ? participants.filter(p => p.readyFor === room.track?.videoId).length
+    : 0;
+
+  const notify = (message: string) => {
+    setToast(message);
+    window.setTimeout(() => setToast(''), 2200);
+  };
+
+  const enterRoom = (code: string, newUid: string) => {
+    setRoomCode(code);
+    setUid(newUid);
+    setView('room');
+    setAudioUnlocked(false);
+    setAutoplayBlocked(false);
+    const url = new URL(window.location.href);
+    url.searchParams.set('room', code);
+    history.replaceState({}, '', url);
+  };
+
+  const handleCreate = async () => {
+    if (!name.trim()) return setError('Give yourself a name first.');
+    if (!firebaseConfigured) return setError('Firebase credentials are needed before rooms can go live.');
+    setBusy(true);
+    setError('');
+    try {
+      localStorage.setItem('vibify-name', name.trim());
+      const result = await createRoom(name.trim());
+      enterRoom(result.code, result.uid);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create room.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleJoin = async (event?: FormEvent) => {
+    event?.preventDefault();
+    const code = joinCode.trim().toUpperCase();
+    if (!name.trim()) return setError('Give yourself a name first.');
+    if (code.length !== 6) return setError('Room codes are six characters.');
+    if (!firebaseConfigured) return setError('Firebase credentials are needed before rooms can go live.');
+    setBusy(true);
+    setError('');
+    try {
+      localStorage.setItem('vibify-name', name.trim());
+      const result = await joinRoom(code, name.trim());
+      enterRoom(code, result.uid);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not join room.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exitRoom = async () => {
+    if (roomCode && uid) await leaveRoom(roomCode, uid);
+    setView('home');
+    setRoom(null);
+    setRoomCode('');
+    setUid('');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('room');
+    history.replaceState({}, '', url.pathname);
+  };
+
+  const unlockAudio = () => {
+    playerRef.current?.unlockAudio();
+    setAudioUnlocked(true);
+    setAutoplayBlocked(false);
+    notify('Audio unlocked on this device');
+  };
+
+  const sendPlay = async () => {
+    if (!room || !isHost || !room.track) return;
+    const lead = 1000;
+    const current = playerRef.current?.getCurrentTime() ?? room.playback.position;
+    await writePlayback(roomCode, {
+      status: 'playing',
+      position: current,
+      executeAt: serverNow() + lead,
+      version: room.playback.version + 1
+    });
+  };
+
+  const sendPause = async () => {
+    if (!room || !isHost || !room.track) return;
+    const lead = 350;
+    const current = playerRef.current?.getCurrentTime() ?? room.playback.position;
+    const position = current + (room.playback.status === 'playing' ? lead / 1000 : 0);
+    await writePlayback(roomCode, {
+      status: 'paused',
+      position,
+      executeAt: serverNow() + lead,
+      version: room.playback.version + 1
+    });
+  };
+
+  const sendSeek = async (position: number) => {
+    if (!room || !isHost || !room.track) return;
+    const target = Math.max(0, Math.min(duration || Number.MAX_SAFE_INTEGER, position));
+    await writePlayback(roomCode, {
+      status: room.playback.status,
+      position: target,
+      executeAt: serverNow() + 450,
+      version: room.playback.version + 1
+    });
+  };
+
+  const searchSongs = async (event: FormEvent) => {
+    event.preventDefault();
+    if (searchQuery.trim().length < 2) return;
+    setSearching(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/youtube/search?q=${encodeURIComponent(searchQuery.trim())}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? 'Search failed.');
+      setResults(data.tracks ?? []);
+    } catch (e) {
+      setResults(FALLBACK_TRACKS);
+      setError(e instanceof Error ? `${e.message} Showing demo tracks for now.` : 'Search unavailable.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const chooseTrack = async (track: Track) => {
+    if (!room || !isHost) return;
+    await setTrack(roomCode, track, room.playback.version);
+    setSearchOpen(false);
+    setAudioUnlocked(false);
+    notify('Track sent to the room');
+  };
+
+  const copyInvite = async () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('room', roomCode);
+    await navigator.clipboard.writeText(url.toString());
+    notify('Invite link copied');
+  };
+
+  if (view === 'home') {
+    return (
+      <main className="home-shell">
+        <Ambient />
+        <nav className="nav"><Logo /><span className="nav-tag">SYNCED LISTENING</span></nav>
+        <section className="hero">
+          <div className="hero-copy">
+            <div className="eyebrow"><Radio size={14} /> ONE ROOM · ONE SONG · EVERY DEVICE</div>
+            <h1>Press play once.<br /><span>Everyone hears it.</span></h1>
+            <p>Vibify turns a room code into a shared listening session. Phones and laptops stream the same track directly from YouTube while the host keeps everyone together.</p>
+            <div className="hero-chips"><span><Volume2 size={15}/> Direct playback</span><span><Radio size={15}/> Live room sync</span><span><Headphones size={15}/> Phone + laptop</span></div>
+          </div>
+          <div className="entry-card glass">
+            <div className="entry-top"><span>START A SESSION</span><Sparkles size={18}/></div>
+            <label>Your name</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="What should the room call you?" maxLength={24} />
+            <button className="primary" onClick={handleCreate} disabled={busy}>{busy ? <LoaderCircle className="spin"/> : <Plus/>}<span>Create listening room</span><ChevronRight/></button>
+            <div className="or"><span/>OR JOIN WITH A CODE<span/></div>
+            <form onSubmit={handleJoin} className="join-form">
+              <input className="code-input" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))} placeholder="ABC123" maxLength={6}/>
+              <button type="submit" className="secondary" disabled={busy}>Join</button>
+            </form>
+            {error && <p className="error-text">{error}</p>}
+            {!firebaseConfigured && <div className="setup-note"><span className="pulse-dot"/><b>Build ready.</b> Firebase keys are the only thing missing for live rooms.</div>}
+          </div>
+        </section>
+        <section className="how-strip">
+          <div><b>01</b><span>Create a code</span></div><div><b>02</b><span>Friends join</span></div><div><b>03</b><span>Pick a track</span></div><div><b>04</b><span>Listen together</span></div>
+        </section>
+      </main>
+    );
+  }
+
+  if (!room) {
+    return <main className="loading-screen"><Logo/><LoaderCircle className="spin"/><span>Joining room {roomCode}…</span>{error && <p>{error}</p>}</main>;
+  }
+
+  const currentTime = seekDraft ?? displayTime;
+
+  return (
+    <main className="room-shell">
+      <Ambient />
+      <nav className="room-nav">
+        <div className="nav-left"><button className="icon-button" onClick={exitRoom}><ArrowLeft/></button><Logo/></div>
+        <div className="room-code-pill"><span className="live-dot"/>ROOM <b>{roomCode}</b><button onClick={copyInvite}><Copy size={15}/></button></div>
+        <div className="nav-right"><span><Users size={16}/>{participants.length}</span><button className="icon-button" onClick={exitRoom}><LogOut/></button></div>
+      </nav>
+
+      <div className="room-grid">
+        <section className="player-column">
+          <div className="now-card glass">
+            <div className="video-wrap">
+              {room.track ? (
+                <YouTubePlayer
+                  ref={playerRef}
+                  roomCode={roomCode}
+                  uid={uid}
+                  track={room.track}
+                  playback={room.playback}
+                  onAutoplayBlocked={() => { setAutoplayBlocked(true); setAudioUnlocked(false); }}
+                />
+              ) : (
+                <div className="empty-player"><div className="disc"><Music2/></div><h2>No track yet</h2><p>{isHost ? 'Search for something everyone should hear.' : `${room.hostName} is choosing the first track.`}</p></div>
+              )}
+              {room.track && (!audioUnlocked || autoplayBlocked) && (
+                <div className="unlock-overlay">
+                  <button onClick={unlockAudio}><Volume2/><span><b>Enable audio</b><small>Tap once on this device</small></span></button>
+                </div>
+              )}
+            </div>
+
+            <div className="track-area">
+              <div className="track-copy">
+                <span className="eyebrow">NOW PLAYING</span>
+                <h1>{room.track?.title ?? 'Waiting for music'}</h1>
+                <p>{room.track?.channelTitle ?? `Hosted by ${room.hostName}`}</p>
+              </div>
+              {isHost && <button className="add-track" onClick={() => setSearchOpen(true)}><Search size={18}/>Find music</button>}
+            </div>
+
+            <div className={`controls ${!isHost ? 'guest-controls' : ''}`}>
+              <div className="timeline">
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(duration, 1)}
+                  step={0.1}
+                  value={Math.min(currentTime, Math.max(duration, 1))}
+                  disabled={!isHost || !room.track}
+                  onChange={e => setSeekDraft(Number(e.target.value))}
+                  onMouseUp={() => { if (seekDraft !== null) void sendSeek(seekDraft); setSeekDraft(null); }}
+                  onTouchEnd={() => { if (seekDraft !== null) void sendSeek(seekDraft); setSeekDraft(null); }}
+                />
+                <div><span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span></div>
+              </div>
+              <div className="transport">
+                <button disabled={!isHost || !room.track} onClick={() => sendSeek((playerRef.current?.getCurrentTime() ?? 0) - 10)}><SkipBack/></button>
+                <button className="main-play" disabled={!isHost || !room.track} onClick={room.playback.status === 'playing' ? sendPause : sendPlay}>{room.playback.status === 'playing' ? <Pause/> : <Play fill="currentColor"/>}</button>
+                <button disabled={!isHost || !room.track} onClick={() => sendSeek((playerRef.current?.getCurrentTime() ?? 0) + 10)}><SkipForward/></button>
+              </div>
+              <p className="control-note">{isHost ? 'You control playback for the whole room.' : `Listening with ${room.hostName} · host controls playback.`}</p>
+            </div>
+          </div>
+        </section>
+
+        <aside className="side-column">
+          <section className="glass sync-panel">
+            <div className="panel-title"><div><span className="eyebrow">ROOM HEALTH</span><h2>In sync</h2></div><div className="sync-badge"><span/>LIVE</div></div>
+            <div className="sync-stat"><div><span>Ready for this track</span><b>{room.track ? `${readyCount}/${participants.length}` : '—'}</b></div><div><span>Your drift</span><b className={Math.abs(me?.driftMs ?? 0) > 700 ? 'warn' : ''}>{room.playback.status === 'playing' ? `${me?.driftMs ?? 0} ms` : 'paused'}</b></div></div>
+            <div className="member-list">
+              {participants.map(participant => <ParticipantRow key={participant.uid} participant={participant} hostUid={room.hostUid} trackId={room.track?.videoId}/>) }
+            </div>
+            <button className="invite-button" onClick={copyInvite}><Copy size={17}/>Copy invite link</button>
+          </section>
+
+          <section className="glass room-note">
+            <div className="note-icon"><Radio/></div><div><b>How Vibify stays smooth</b><p>The song comes directly from YouTube on every device. This room only sends tiny play, pause and seek commands.</p></div>
+          </section>
+        </aside>
+      </div>
+
+      {searchOpen && (
+        <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSearchOpen(false); }}>
+          <section className="search-modal glass">
+            <div className="search-head"><div><span className="eyebrow">HOST MUSIC SEARCH</span><h2>What should the room hear?</h2></div><button className="icon-button" onClick={() => setSearchOpen(false)}><X/></button></div>
+            <form className="search-box" onSubmit={searchSongs}><Search/><input autoFocus value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search songs, artists, moods…"/><button type="submit" disabled={searching}>{searching ? <LoaderCircle className="spin"/> : 'Search'}</button></form>
+            {error && <p className="search-error">{error}</p>}
+            <div className="results-list">
+              {results.length === 0 && !searching && <div className="search-empty"><Music2/><b>Search YouTube</b><span>Only embeddable videos are returned.</span></div>}
+              {results.map(track => (
+                <button key={track.videoId} className="track-result" onClick={() => chooseTrack(track)}>
+                  <img src={track.thumbnail} alt=""/><span><b>{track.title}</b><small>{track.channelTitle}</small></span><Play size={18} fill="currentColor"/>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {toast && <div className="toast"><Check size={16}/>{toast}</div>}
+    </main>
+  );
+}
+
+function ParticipantRow({ participant, hostUid, trackId }: { participant: Participant; hostUid: string; trackId?: string }) {
+  const ready = Boolean(trackId && participant.readyFor === trackId);
+  const drift = participant.driftMs ?? 0;
+  return (
+    <div className="member-row">
+      <div className="avatar">{participant.name.charAt(0).toUpperCase()}</div>
+      <div className="member-copy"><b>{participant.name}</b><span>{participant.device}{participant.uid === hostUid ? ' · host' : ''}</span></div>
+      <div className="member-state"><span className={ready ? 'ready' : 'waiting'}>{trackId ? (ready ? 'READY' : 'LOADING') : 'JOINED'}</span>{ready && participant.playerState === 1 && <small>{drift > 0 ? '+' : ''}{drift} ms</small>}</div>
+    </div>
+  );
+}
+
+function Logo() {
+  return <div className="logo"><span className="logo-mark"><i/><i/><i/></span><b>VIBIFY</b></div>;
+}
+
+function Ambient() {
+  return <div className="ambient" aria-hidden="true"><i/><i/><i/></div>;
+}
+
+function formatTime(value: number) {
+  if (!Number.isFinite(value) || value < 0) return '0:00';
+  const minutes = Math.floor(value / 60);
+  const seconds = Math.floor(value % 60).toString().padStart(2, '0');
+  return `${minutes}:${seconds}`;
+}
