@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Live Vibify
+    url: https://vibify-mu.vercel.app
+    about: Open the production app to reproduce or verify a room issue.
+  - name: Security vulnerability
+    url: https://github.com/Rishikeshsanin/vibify/security
+    about: Please report security issues privately instead of opening a public issue.
