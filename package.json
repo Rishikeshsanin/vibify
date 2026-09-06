@@ -2,6 +2,29 @@
   "name": "vibify",
   "version": "0.1.0",
   "private": true,
+  "description": "A real-time shared listening room for phones and laptops, powered by YouTube playback and Firebase room sync.",
+  "author": "Rishikeshsanin",
+  "license": "MIT",
+  "homepage": "https://vibify-mu.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Rishikeshsanin/vibify.git"
+  },
+  "keywords": [
+    "music",
+    "shared-listening",
+    "realtime",
+    "youtube",
+    "firebase",
+    "nextjs",
+    "typescript",
+    "sync",
+    "watch-party",
+    "spotify-jam"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
