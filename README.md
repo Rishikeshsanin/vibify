@@ -26,6 +26,10 @@ YOUTUBE_DATA_API_KEY=
 
 Store that value in Vercel environment variables. Do not commit it to GitHub.
 
+## Deployment
+
+Vercel is connected to `Rishikeshsanin/vibify`; pushes to the repository default branch (`main`) are used for production deployment.
+
 ## Firebase setup
 
 - Anonymous Authentication must be enabled.
