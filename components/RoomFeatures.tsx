@@ -38,10 +38,12 @@ type LyricLine = {
 
 type Props = {
   track?: Track;
-  roomTime: number;
+  playbackTime: number;
   duration: number;
   queue: QueueItem[];
   isHost: boolean;
+  followingVibe: boolean;
+  localGapMs: number;
   lyricsOffsetMs: number;
   onLyricsOffsetChange: (offsetMs: number) => void;
   onOpenSearch: () => void;
@@ -52,10 +54,12 @@ type Props = {
 
 export function RoomFeatures({
   track,
-  roomTime,
+  playbackTime,
   duration,
   queue,
   isHost,
+  followingVibe,
+  localGapMs,
   lyricsOffsetMs,
   onLyricsOffsetChange,
   onOpenSearch,
@@ -121,7 +125,7 @@ export function RoomFeatures({
     [lyrics?.plainLyrics]
   );
 
-  const lyricsClock = Math.max(0, roomTime - lyricsOffsetMs / 1000);
+  const lyricsClock = Math.max(0, playbackTime - lyricsOffsetMs / 1000);
 
   const activeLine = useMemo(() => {
     if (!syncedLines.length) return -1;
@@ -166,10 +170,14 @@ export function RoomFeatures({
         </header>
 
         {syncedLines.length > 0 && (
-          <div className="lyrics-sync-strip">
+          <div className={`lyrics-sync-strip ${followingVibe ? '' : 'local-lyrics-mode'}`}>
             <div>
-              <b>ROOM-SYNCED LYRICS</b>
-              <span>{formatOffset(lyricsOffsetMs)}{timingMismatch ? ` · video differs by ${formatDelta(durationDelta ?? 0)}` : ''}</span>
+              <b>{followingVibe ? 'ROOM-SYNCED LYRICS' : 'YOUR LOCAL LYRICS'}</b>
+              <span>
+                {followingVibe ? 'Following the shared vibe' : `${formatGap(localGapMs)} from the room`}
+                {` · ${formatOffset(lyricsOffsetMs)}`}
+                {timingMismatch ? ` · video differs by ${formatDelta(durationDelta ?? 0)}` : ''}
+              </span>
             </div>
             {isHost ? (
               <div className="lyrics-calibration" aria-label="Lyrics timing calibration">
@@ -212,7 +220,13 @@ export function RoomFeatures({
             </div>
           )}
         </div>
-        {syncedLines.length > 0 && <div className="lyrics-foot">Every device follows the same room clock · host timing correction is shared live</div>}
+        {syncedLines.length > 0 && (
+          <div className="lyrics-foot">
+            {followingVibe
+              ? 'Everyone following the vibe sees the same lyric line'
+              : 'You paused or moved locally · catch up to return to the shared lyric line'}
+          </div>
+        )}
       </section>
 
       <section className="glass queue-panel-v2">
@@ -289,4 +303,11 @@ function formatOffset(offsetMs: number) {
 function formatDelta(deltaSeconds: number) {
   const rounded = Math.abs(deltaSeconds).toFixed(Math.abs(deltaSeconds) >= 10 ? 0 : 1);
   return `${rounded}s ${deltaSeconds > 0 ? 'longer' : 'shorter'}`;
+}
+
+function formatGap(gapMs: number) {
+  const seconds = Math.abs(gapMs) / 1000;
+  if (seconds < 0.75) return 'almost together';
+  const value = seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
+  return gapMs < 0 ? `${value} behind` : `${value} ahead`;
 }
