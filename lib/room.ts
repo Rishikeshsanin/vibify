@@ -72,6 +72,7 @@ export async function createRoom(hostName: string) {
     hostName,
     createdAt: now,
     playback,
+    lyricsOffsetMs: 0,
     participants: { [user.uid]: participant }
   } satisfies Room);
 
@@ -114,6 +115,7 @@ export async function setTrack(code: string, track: Track, version: number) {
   const now = serverNow();
   await update(ref(db, `rooms/${code}`), {
     track,
+    lyricsOffsetMs: 0,
     playback: { status: 'paused', position: 0, executeAt: now + 450, version: version + 1 }
   });
 }
@@ -121,6 +123,12 @@ export async function setTrack(code: string, track: Track, version: number) {
 export async function writePlayback(code: string, playback: PlaybackState) {
   if (!db) throw new Error('Firebase is not configured.');
   await set(ref(db, `rooms/${code}/playback`), playback);
+}
+
+export async function setLyricsOffset(code: string, offsetMs: number) {
+  if (!db) throw new Error('Firebase is not configured.');
+  const safeOffset = Math.max(-60000, Math.min(60000, Math.round(offsetMs / 50) * 50));
+  await set(ref(db, `rooms/${code}/lyricsOffsetMs`), safeOffset);
 }
 
 export async function updateParticipant(code: string, uid: string, patch: Partial<Participant>) {
@@ -173,6 +181,7 @@ export async function playQueueItem(
   const now = serverNow();
   await update(ref(db, `rooms/${code}`), {
     track: item.track,
+    lyricsOffsetMs: 0,
     playback: {
       status: autoplay ? 'playing' : 'paused',
       position: 0,
