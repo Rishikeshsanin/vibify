@@ -10,9 +10,19 @@ import {
   update
 } from 'firebase/database';
 import { db, ensureAnonymousUser } from './firebase';
-import type { Participant, PlaybackState, QueueItem, Room, Track } from './types';
+import type {
+  ChatMessage,
+  Participant,
+  PlaybackState,
+  QueueItem,
+  ReactionEvent,
+  Room,
+  Track
+} from './types';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+export const CHAT_TTL_MS = 10 * 60 * 1000;
+export const REACTION_TTL_MS = 6500;
 
 export function createRoomCode(length = 6) {
   return Array.from({ length }, () => ALPHABET[Math.floor(Math.random() * ALPHABET.length)]).join('');
@@ -45,6 +55,14 @@ export function serverNow() {
   return Date.now() + serverTimeOffset;
 }
 
+export function roomPlaybackPosition(playback: PlaybackState, now = serverNow()) {
+  return Math.max(
+    0,
+    playback.position +
+      (playback.status === 'playing' ? Math.max(0, now - playback.executeAt) / 1000 : 0)
+  );
+}
+
 export async function createRoom(hostName: string) {
   if (!db) throw new Error('Firebase is not configured.');
   const user = await ensureAnonymousUser();
@@ -63,6 +81,7 @@ export async function createRoom(hostName: string) {
     role: 'host',
     device: getDeviceLabel(),
     online: true,
+    followingRoom: true,
     joinedAt: now
   };
 
@@ -93,6 +112,7 @@ export async function joinRoom(code: string, guestName: string) {
     role: room.hostUid === user.uid ? 'host' : 'guest',
     device: getDeviceLabel(),
     online: true,
+    followingRoom: true,
     joinedAt: serverNow()
   };
   await set(ref(db, `rooms/${code}/participants/${user.uid}`), participant);
@@ -134,6 +154,51 @@ export async function setLyricsOffset(code: string, offsetMs: number) {
 export async function updateParticipant(code: string, uid: string, patch: Partial<Participant>) {
   if (!db) return;
   await update(ref(db, `rooms/${code}/participants/${uid}`), patch);
+}
+
+export async function sendChatMessage(code: string, uid: string, name: string, text: string) {
+  if (!db) throw new Error('Firebase is not configured.');
+  const clean = text.replace(/\s+/g, ' ').trim().slice(0, 180);
+  if (!clean) return null;
+  const now = serverNow();
+  const id = `${Math.round(now).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const message: ChatMessage = {
+    id,
+    uid,
+    name: name.trim().slice(0, 24) || 'Listener',
+    text: clean,
+    createdAt: now,
+    expiresAt: now + CHAT_TTL_MS
+  };
+  await set(ref(db, `rooms/${code}/participants/${uid}/messages/${id}`), message);
+  return message;
+}
+
+export async function removeChatMessage(code: string, uid: string, messageId: string) {
+  if (!db) return;
+  await remove(ref(db, `rooms/${code}/participants/${uid}/messages/${messageId}`));
+}
+
+export async function sendReaction(code: string, uid: string, name: string, emoji: string) {
+  if (!db) throw new Error('Firebase is not configured.');
+  const safeEmoji = emoji.slice(0, 8);
+  const now = serverNow();
+  const id = `${Math.round(now).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const reaction: ReactionEvent = {
+    id,
+    uid,
+    name: name.trim().slice(0, 24) || 'Listener',
+    emoji: safeEmoji,
+    createdAt: now,
+    expiresAt: now + REACTION_TTL_MS
+  };
+  await set(ref(db, `rooms/${code}/participants/${uid}/reactions/${id}`), reaction);
+  return reaction;
+}
+
+export async function removeReaction(code: string, uid: string, reactionId: string) {
+  if (!db) return;
+  await remove(ref(db, `rooms/${code}/participants/${uid}/reactions/${reactionId}`));
 }
 
 export async function addToQueue(
