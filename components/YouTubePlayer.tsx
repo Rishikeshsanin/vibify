@@ -179,15 +179,19 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
           },
           onStateChange: (event: YT.OnStateChangeEvent) => {
             const now = Date.now();
+            const player = playerRef.current;
             lastPlayerStateRef.current = event.data;
             playerStateChangeRef.current?.(event.data);
             if (event.data === 3) lastBufferingAtRef.current = now;
 
             const state = playbackRef.current;
             const outsideRoomCommand = now > roomCommandGraceRef.current;
-            if (outsideRoomCommand) {
-              if (event.data === 2 && state.status === 'playing') setFollowingRoom(false);
-              if (event.data === 1 && state.status === 'paused') setFollowingRoom(false);
+            if (outsideRoomCommand && player && [1, 2, 5].includes(event.data)) {
+              const gap = player.getCurrentTime() - roomPlaybackPosition(state);
+              const stateConflict =
+                (event.data === 2 && state.status === 'playing') ||
+                (event.data === 1 && state.status === 'paused');
+              if (stateConflict || Math.abs(gap) > 1.25) setFollowingRoom(false);
             }
 
             if (event.data === 0 && followingRoomRef.current) endedRef.current?.();
@@ -286,14 +290,12 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
 
       if (
         followingRoomRef.current &&
-        state.status === 'playing' &&
         outsideCommand &&
         !recentlyBuffered &&
         Math.abs(drift) > 2.2
       ) {
-        // A large jump outside a host command is almost always a deliberate
-        // native YouTube seek/pause or a device that fell far behind. Preserve
-        // the listener's local position and offer a one-tap catch-up instead.
+        // Preserve an intentional native YouTube position instead of silently
+        // snapping the listener back. The UI will offer a one-tap catch-up.
         setFollowingRoom(false);
         return;
       }
