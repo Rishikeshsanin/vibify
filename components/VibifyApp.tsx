@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Copy,
   Headphones,
+  ListPlus,
   LoaderCircle,
   LogOut,
   Music2,
@@ -24,16 +25,21 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { firebaseConfigured } from '@/lib/firebase';
 import {
+  addToQueue,
   bindServerClock,
   createRoom,
   joinRoom,
   leaveRoom,
+  playQueueItem,
+  removeQueueItem,
+  reorderQueue,
   serverNow,
   setTrack,
   subscribeRoom,
   writePlayback
 } from '@/lib/room';
-import type { Participant, Room, Track } from '@/lib/types';
+import type { Participant, QueueItem, Room, Track } from '@/lib/types';
+import { RoomFeatures } from './RoomFeatures';
 import { YouTubePlayer, type YouTubeHandle } from './YouTubePlayer';
 
 type View = 'home' | 'room';
@@ -55,6 +61,7 @@ const FALLBACK_TRACKS: Track[] = [
 
 export function VibifyApp() {
   const playerRef = useRef<YouTubeHandle>(null);
+  const advancingRef = useRef(false);
   const [view, setView] = useState<View>('home');
   const [roomCode, setRoomCode] = useState('');
   const [uid, setUid] = useState('');
@@ -62,6 +69,8 @@ export function VibifyApp() {
   const [name, setName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [controlBusy, setControlBusy] = useState(false);
+  const [playerReady, setPlayerReady] = useState(false);
   const [error, setError] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -97,12 +106,16 @@ export function VibifyApp() {
   }, [roomCode]);
 
   useEffect(() => {
-    if (!room?.track) return;
+    if (!room?.track) {
+      setDuration(0);
+      setDisplayTime(0);
+      return;
+    }
     const timer = window.setInterval(() => {
       const d = playerRef.current?.getDuration() ?? 0;
       if (d > 0) setDuration(d);
       setDisplayTime(playerRef.current?.getCurrentTime() ?? 0);
-    }, 500);
+    }, 300);
     return () => clearInterval(timer);
   }, [room?.track?.videoId]);
 
@@ -111,6 +124,10 @@ export function VibifyApp() {
   const participants = useMemo(
     () => Object.values(room?.participants ?? {}).filter(p => p.online !== false),
     [room?.participants]
+  );
+  const queueItems = useMemo(
+    () => Object.values(room?.queue ?? {}).sort((a, b) => (a.order - b.order) || (a.addedAt - b.addedAt)),
+    [room?.queue]
   );
   const readyCount = room?.track
     ? participants.filter(p => p.readyFor === room.track?.videoId).length
@@ -127,6 +144,7 @@ export function VibifyApp() {
     setView('room');
     setAudioUnlocked(false);
     setAutoplayBlocked(false);
+    setPlayerReady(false);
     const url = new URL(window.location.href);
     url.searchParams.set('room', code);
     history.replaceState({}, '', url);
@@ -173,52 +191,72 @@ export function VibifyApp() {
     setRoom(null);
     setRoomCode('');
     setUid('');
+    setAudioUnlocked(false);
+    setAutoplayBlocked(false);
+    setPlayerReady(false);
     const url = new URL(window.location.href);
     url.searchParams.delete('room');
     history.replaceState({}, '', url.pathname);
   };
 
   const unlockAudio = () => {
+    if (!playerReady) {
+      notify('Player is still loading');
+      return;
+    }
     playerRef.current?.unlockAudio();
     setAudioUnlocked(true);
     setAutoplayBlocked(false);
-    notify('Audio unlocked on this device');
+    notify('Audio enabled for this room');
+  };
+
+  const performControl = async (action: () => Promise<void>) => {
+    if (controlBusy) return;
+    setControlBusy(true);
+    setError('');
+    try {
+      await action();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Playback command failed. Please try again.');
+      notify('Playback command failed');
+    } finally {
+      setControlBusy(false);
+    }
   };
 
   const sendPlay = async () => {
-    if (!room || !isHost || !room.track) return;
-    const lead = 1000;
+    if (!room || !isHost || !room.track || !playerReady) return;
     const current = playerRef.current?.getCurrentTime() ?? room.playback.position;
-    await writePlayback(roomCode, {
+    await performControl(() => writePlayback(roomCode, {
       status: 'playing',
       position: current,
-      executeAt: serverNow() + lead,
+      executeAt: serverNow() + 800,
       version: room.playback.version + 1
-    });
+    }));
   };
 
   const sendPause = async () => {
-    if (!room || !isHost || !room.track) return;
-    const lead = 350;
+    if (!room || !isHost || !room.track || !playerReady) return;
+    const lead = 260;
     const current = playerRef.current?.getCurrentTime() ?? room.playback.position;
     const position = current + (room.playback.status === 'playing' ? lead / 1000 : 0);
-    await writePlayback(roomCode, {
+    await performControl(() => writePlayback(roomCode, {
       status: 'paused',
       position,
       executeAt: serverNow() + lead,
       version: room.playback.version + 1
-    });
+    }));
   };
 
   const sendSeek = async (position: number) => {
-    if (!room || !isHost || !room.track) return;
+    if (!room || !isHost || !room.track || !playerReady) return;
     const target = Math.max(0, Math.min(duration || Number.MAX_SAFE_INTEGER, position));
-    await writePlayback(roomCode, {
+    await performControl(() => writePlayback(roomCode, {
       status: room.playback.status,
       position: target,
-      executeAt: serverNow() + 450,
+      executeAt: serverNow() + 320,
       version: room.playback.version + 1
-    });
+    }));
   };
 
   const searchSongs = async (event: FormEvent) => {
@@ -241,10 +279,67 @@ export function VibifyApp() {
 
   const chooseTrack = async (track: Track) => {
     if (!room || !isHost) return;
-    await setTrack(roomCode, track, room.playback.version);
-    setSearchOpen(false);
-    setAudioUnlocked(false);
-    notify('Track sent to the room');
+    try {
+      await setTrack(roomCode, track, room.playback.version);
+      setSearchOpen(false);
+      notify('Playing selection ready');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not change track.');
+    }
+  };
+
+  const queueTrack = async (track: Track) => {
+    if (!room || !isHost) return;
+    try {
+      await addToQueue(roomCode, track, uid, name.trim() || room.hostName);
+      notify('Added to queue');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not add to queue.');
+    }
+  };
+
+  const playQueued = async (item: QueueItem) => {
+    if (!room || !isHost) return;
+    await performControl(async () => {
+      await playQueueItem(roomCode, item, room.playback.version, true);
+      notify('Playing from queue');
+    });
+  };
+
+  const removeQueued = async (item: QueueItem) => {
+    if (!isHost) return;
+    try {
+      await removeQueueItem(roomCode, item.id);
+      notify('Removed from queue');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update queue.');
+    }
+  };
+
+  const moveQueued = async (item: QueueItem, delta: -1 | 1) => {
+    if (!isHost) return;
+    const index = queueItems.findIndex(entry => entry.id === item.id);
+    const nextIndex = index + delta;
+    if (index < 0 || nextIndex < 0 || nextIndex >= queueItems.length) return;
+    const nextQueue = [...queueItems];
+    [nextQueue[index], nextQueue[nextIndex]] = [nextQueue[nextIndex], nextQueue[index]];
+    try {
+      await reorderQueue(roomCode, nextQueue);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not reorder queue.');
+    }
+  };
+
+  const handleTrackEnded = async () => {
+    if (!room || !isHost || queueItems.length === 0 || advancingRef.current) return;
+    advancingRef.current = true;
+    try {
+      await playQueueItem(roomCode, queueItems[0], room.playback.version, true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not advance the queue.');
+    } finally {
+      window.setTimeout(() => { advancingRef.current = false; }, 1200);
+    }
   };
 
   const copyInvite = async () => {
@@ -292,9 +387,10 @@ export function VibifyApp() {
   }
 
   const currentTime = seekDraft ?? displayTime;
+  const controlsDisabled = !isHost || !room.track || !playerReady || controlBusy;
 
   return (
-    <main className="room-shell">
+    <main className="room-shell v2-room-shell">
       <Ambient />
       <nav className="room-nav">
         <div className="nav-left"><button className="icon-button" onClick={exitRoom}><ArrowLeft/></button><Logo/></div>
@@ -313,14 +409,19 @@ export function VibifyApp() {
                   uid={uid}
                   track={room.track}
                   playback={room.playback}
-                  onAutoplayBlocked={() => { setAutoplayBlocked(true); setAudioUnlocked(false); }}
+                  onReadyChange={setPlayerReady}
+                  onEnded={() => { void handleTrackEnded(); }}
+                  onAutoplayBlocked={() => {
+                    setAutoplayBlocked(true);
+                    setAudioUnlocked(false);
+                  }}
                 />
               ) : (
                 <div className="empty-player"><div className="disc"><Music2/></div><h2>No track yet</h2><p>{isHost ? 'Search for something everyone should hear.' : `${room.hostName} is choosing the first track.`}</p></div>
               )}
               {room.track && (!audioUnlocked || autoplayBlocked) && (
                 <div className="unlock-overlay">
-                  <button onClick={unlockAudio}><Volume2/><span><b>Enable audio</b><small>Tap once on this device</small></span></button>
+                  <button onClick={unlockAudio} disabled={!playerReady}><Volume2/><span><b>{playerReady ? 'Enable audio' : 'Loading player…'}</b><small>{playerReady ? 'Only once for this room' : 'One moment'}</small></span></button>
                 </div>
               )}
             </div>
@@ -342,19 +443,22 @@ export function VibifyApp() {
                   max={Math.max(duration, 1)}
                   step={0.1}
                   value={Math.min(currentTime, Math.max(duration, 1))}
-                  disabled={!isHost || !room.track}
+                  disabled={controlsDisabled}
                   onChange={e => setSeekDraft(Number(e.target.value))}
-                  onMouseUp={() => { if (seekDraft !== null) void sendSeek(seekDraft); setSeekDraft(null); }}
-                  onTouchEnd={() => { if (seekDraft !== null) void sendSeek(seekDraft); setSeekDraft(null); }}
+                  onPointerUp={() => { if (seekDraft !== null) void sendSeek(seekDraft); setSeekDraft(null); }}
+                  onKeyUp={() => { if (seekDraft !== null) void sendSeek(seekDraft); setSeekDraft(null); }}
+                  onBlur={() => { if (seekDraft !== null) void sendSeek(seekDraft); setSeekDraft(null); }}
                 />
                 <div><span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span></div>
               </div>
               <div className="transport">
-                <button disabled={!isHost || !room.track} onClick={() => sendSeek((playerRef.current?.getCurrentTime() ?? 0) - 10)}><SkipBack/></button>
-                <button className="main-play" disabled={!isHost || !room.track} onClick={room.playback.status === 'playing' ? sendPause : sendPlay}>{room.playback.status === 'playing' ? <Pause/> : <Play fill="currentColor"/>}</button>
-                <button disabled={!isHost || !room.track} onClick={() => sendSeek((playerRef.current?.getCurrentTime() ?? 0) + 10)}><SkipForward/></button>
+                <button disabled={controlsDisabled} onClick={() => { void sendSeek((playerRef.current?.getCurrentTime() ?? 0) - 10); }}><SkipBack/></button>
+                <button className="main-play" disabled={controlsDisabled} onClick={() => { void (room.playback.status === 'playing' ? sendPause() : sendPlay()); }}>
+                  {controlBusy ? <LoaderCircle className="spin"/> : room.playback.status === 'playing' ? <Pause/> : <Play fill="currentColor"/>}
+                </button>
+                <button disabled={controlsDisabled} onClick={() => { void sendSeek((playerRef.current?.getCurrentTime() ?? 0) + 10); }}><SkipForward/></button>
               </div>
-              <p className="control-note">{isHost ? 'You control playback for the whole room.' : `Listening with ${room.hostName} · host controls playback.`}</p>
+              <p className="control-note">{isHost ? (playerReady ? 'You control playback for the whole room.' : 'Player is getting ready…') : `Listening with ${room.hostName} · host controls playback.`}</p>
             </div>
           </div>
         </section>
@@ -362,7 +466,7 @@ export function VibifyApp() {
         <aside className="side-column">
           <section className="glass sync-panel">
             <div className="panel-title"><div><span className="eyebrow">ROOM HEALTH</span><h2>In sync</h2></div><div className="sync-badge"><span/>LIVE</div></div>
-            <div className="sync-stat"><div><span>Ready for this track</span><b>{room.track ? `${readyCount}/${participants.length}` : '—'}</b></div><div><span>Your drift</span><b className={Math.abs(me?.driftMs ?? 0) > 700 ? 'warn' : ''}>{room.playback.status === 'playing' ? `${me?.driftMs ?? 0} ms` : 'paused'}</b></div></div>
+            <div className="sync-stat"><div><span>Ready for this track</span><b>{room.track ? `${readyCount}/${participants.length}` : '—'}</b></div><div><span>Your drift</span><b className={Math.abs(me?.driftMs ?? 0) > 1200 ? 'warn' : ''}>{room.playback.status === 'playing' ? `${me?.driftMs ?? 0} ms` : 'paused'}</b></div></div>
             <div className="member-list">
               {participants.map(participant => <ParticipantRow key={participant.uid} participant={participant} hostUid={room.hostUid} trackId={room.track?.videoId}/>) }
             </div>
@@ -370,23 +474,40 @@ export function VibifyApp() {
           </section>
 
           <section className="glass room-note">
-            <div className="note-icon"><Radio/></div><div><b>How Vibify stays smooth</b><p>The song comes directly from YouTube on every device. This room only sends tiny play, pause and seek commands.</p></div>
+            <div className="note-icon"><Radio/></div><div><b>V2 playback guard</b><p>Vibify now avoids constant hard-seeks and dramatically reduces realtime drift writes, so more friends can join without every device constantly re-rendering room telemetry.</p></div>
           </section>
         </aside>
       </div>
 
+      <RoomFeatures
+        track={room.track}
+        currentTime={displayTime}
+        duration={duration}
+        queue={queueItems}
+        isHost={isHost}
+        onOpenSearch={() => setSearchOpen(true)}
+        onPlay={item => { void playQueued(item); }}
+        onRemove={item => { void removeQueued(item); }}
+        onMove={(item, delta) => { void moveQueued(item, delta); }}
+      />
+
       {searchOpen && (
         <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSearchOpen(false); }}>
-          <section className="search-modal glass">
+          <section className="search-modal glass v2-search-modal">
             <div className="search-head"><div><span className="eyebrow">HOST MUSIC SEARCH</span><h2>What should the room hear?</h2></div><button className="icon-button" onClick={() => setSearchOpen(false)}><X/></button></div>
             <form className="search-box" onSubmit={searchSongs}><Search/><input autoFocus value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search songs, artists, moods…"/><button type="submit" disabled={searching}>{searching ? <LoaderCircle className="spin"/> : 'Search'}</button></form>
             {error && <p className="search-error">{error}</p>}
             <div className="results-list">
-              {results.length === 0 && !searching && <div className="search-empty"><Music2/><b>Search YouTube</b><span>Only embeddable videos are returned.</span></div>}
+              {results.length === 0 && !searching && <div className="search-empty"><Music2/><b>Search YouTube</b><span>Play now or build the room queue.</span></div>}
               {results.map(track => (
-                <button key={track.videoId} className="track-result" onClick={() => chooseTrack(track)}>
-                  <img src={track.thumbnail} alt=""/><span><b>{track.title}</b><small>{track.channelTitle}</small></span><Play size={18} fill="currentColor"/>
-                </button>
+                <div key={track.videoId} className="track-result track-result-v2">
+                  <img src={track.thumbnail} alt=""/>
+                  <span><b>{track.title}</b><small>{track.channelTitle}</small></span>
+                  <div className="result-actions-v2">
+                    <button title="Play now" onClick={() => { void chooseTrack(track); }}><Play size={16} fill="currentColor"/><span>Play</span></button>
+                    <button title="Add to queue" onClick={() => { void queueTrack(track); }}><ListPlus size={16}/><span>Queue</span></button>
+                  </div>
+                </div>
               ))}
             </div>
           </section>
