@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { roomPlaybackPosition, serverNow, updateParticipant } from '@/lib/room';
+import { roomPlaybackPosition, serverNow, updateParticipant, writePlayback } from '@/lib/room';
 import type { PlaybackState, Track } from '@/lib/types';
 
 declare global {
@@ -37,6 +37,7 @@ export type YouTubeHandle = {
 type Props = {
   roomCode: string;
   uid: string;
+  isHost?: boolean;
   track?: Track;
   playback: PlaybackState;
   onAutoplayBlocked?: () => void;
@@ -72,6 +73,7 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
   {
     roomCode,
     uid,
+    isHost = false,
     track,
     playback,
     onAutoplayBlocked,
@@ -98,8 +100,9 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
   const lastBufferingAtRef = useRef(0);
   const lastTelemetryAtRef = useRef(0);
   const lastReportedDriftRef = useRef<number | null>(null);
-  const lastPlayerStateRef = useRef<number | null>(null);
   const followingRoomRef = useRef(true);
+  const hostNativeWriteAtRef = useRef(0);
+  const localVersionRef = useRef(playback.version);
   const [playerReady, setPlayerReady] = useState(false);
 
   useEffect(() => {
@@ -111,10 +114,47 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
   }, [onAutoplayBlocked, onReadyChange, onPlayerStateChange, onFollowingRoomChange, onEnded]);
 
   const setFollowingRoom = (following: boolean) => {
-    if (followingRoomRef.current === following) return;
-    followingRoomRef.current = following;
-    followingChangeRef.current?.(following);
-    void updateParticipant(roomCode, uid, { followingRoom: following });
+    const next = isHost ? true : following;
+    if (followingRoomRef.current === next) return;
+    followingRoomRef.current = next;
+    followingChangeRef.current?.(next);
+    void updateParticipant(roomCode, uid, { followingRoom: next });
+  };
+
+  const publishHostNativeState = (forcedStatus?: 'playing' | 'paused') => {
+    if (!isHost) return;
+    const player = playerRef.current;
+    if (!player || !trackRef.current) return;
+
+    const now = Date.now();
+    if (now <= roomCommandGraceRef.current || now - hostNativeWriteAtRef.current < 550) return;
+
+    const actual = player.getCurrentTime();
+    if (!Number.isFinite(actual)) return;
+
+    const playerState = player.getPlayerState();
+    const status = forcedStatus ?? (playerState === 1 ? 'playing' : 'paused');
+    const lead = status === 'playing' ? 450 : 180;
+    const nextVersion = Math.max(localVersionRef.current, playbackRef.current.version) + 1;
+    localVersionRef.current = nextVersion;
+    hostNativeWriteAtRef.current = now;
+    roomCommandGraceRef.current = now + 1500;
+    commandStartRef.current = now;
+    setFollowingRoom(true);
+
+    // The host is the vibe clock. If the host uses YouTube's own controls,
+    // publish that local position back into the room instead of treating it
+    // like a guest-only detour. Playing commands include a short lead so every
+    // device can start from the same future room timestamp without rewinding
+    // the host when the Firebase update comes back.
+    void writePlayback(roomCode, {
+      status,
+      position: Math.max(0, actual + (status === 'playing' ? lead / 1000 : 0)),
+      executeAt: serverNow() + lead,
+      version: nextVersion
+    }).catch(() => {
+      roomCommandGraceRef.current = 0;
+    });
   };
 
   const applyRoomState = () => {
@@ -180,7 +220,6 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
           onStateChange: (event: YT.OnStateChangeEvent) => {
             const now = Date.now();
             const player = playerRef.current;
-            lastPlayerStateRef.current = event.data;
             playerStateChangeRef.current?.(event.data);
             if (event.data === 3) lastBufferingAtRef.current = now;
 
@@ -191,7 +230,13 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
               const stateConflict =
                 (event.data === 2 && state.status === 'playing') ||
                 (event.data === 1 && state.status === 'paused');
-              if (stateConflict || Math.abs(gap) > 1.25) setFollowingRoom(false);
+
+              if (isHost) {
+                if (event.data === 1) publishHostNativeState('playing');
+                else if (event.data === 2 || (event.data === 5 && Math.abs(gap) > 0.8)) publishHostNativeState('paused');
+              } else if (stateConflict || Math.abs(gap) > 1.25) {
+                setFollowingRoom(false);
+              }
             }
 
             if (event.data === 0 && followingRoomRef.current) endedRef.current?.();
@@ -201,12 +246,12 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
               void updateParticipant(roomCode, uid, {
                 readyFor: currentTrack.videoId,
                 playerState: event.data,
-                followingRoom: followingRoomRef.current
+                followingRoom: isHost ? true : followingRoomRef.current
               });
             } else {
               void updateParticipant(roomCode, uid, {
                 playerState: event.data,
-                followingRoom: followingRoomRef.current
+                followingRoom: isHost ? true : followingRoomRef.current
               });
             }
           },
@@ -221,7 +266,7 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
       playerRef.current?.destroy?.();
       playerRef.current = null;
     };
-  }, [roomCode, uid]);
+  }, [roomCode, uid, isHost]);
 
   useEffect(() => {
     trackRef.current = track;
@@ -242,6 +287,7 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
 
   useEffect(() => {
     playbackRef.current = playback;
+    localVersionRef.current = Math.max(localVersionRef.current, playback.version);
     commandStartRef.current = Date.now();
     const player = playerRef.current;
     if (!playerReady || !track?.videoId || !player) return;
@@ -281,12 +327,26 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
         void updateParticipant(roomCode, uid, {
           driftMs,
           playerState,
-          followingRoom: followingRoomRef.current
+          followingRoom: isHost ? true : followingRoomRef.current
         });
       }
 
       const recentlyBuffered = now - lastBufferingAtRef.current < 6000;
       const outsideCommand = now > roomCommandGraceRef.current;
+
+      if (isHost) {
+        if (outsideCommand && !recentlyBuffered && [1, 2, 5].includes(playerState)) {
+          const stateConflict =
+            (playerState === 2 && state.status === 'playing') ||
+            (playerState === 1 && state.status === 'paused');
+          if (stateConflict || Math.abs(drift) > 0.9) {
+            publishHostNativeState(playerState === 1 ? 'playing' : 'paused');
+          }
+        }
+        // Never "correct" the host back to an old room clock. The host is the
+        // room clock; native YouTube movement should update the room instead.
+        return;
+      }
 
       if (
         followingRoomRef.current &&
@@ -316,7 +376,7 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [playerReady, roomCode, track?.videoId, uid]);
+  }, [playerReady, roomCode, track?.videoId, uid, isHost]);
 
   return <div className="youtube-frame" ref={mountRef} aria-label="YouTube player" />;
 });
