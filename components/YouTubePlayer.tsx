@@ -39,6 +39,7 @@ type Props = {
   playback: PlaybackState;
   onAutoplayBlocked?: () => void;
   onReadyChange?: (ready: boolean) => void;
+  onEnded?: () => void;
 };
 
 let apiPromise: Promise<void> | null = null;
@@ -64,7 +65,7 @@ function loadYouTubeAPI() {
 }
 
 export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePlayer(
-  { roomCode, uid, track, playback, onAutoplayBlocked, onReadyChange },
+  { roomCode, uid, track, playback, onAutoplayBlocked, onReadyChange, onEnded },
   refHandle
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -76,12 +77,18 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
   const commandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoplayBlockedRef = useRef(onAutoplayBlocked);
   const readyChangeRef = useRef(onReadyChange);
+  const endedRef = useRef(onEnded);
+  const lastBufferingAtRef = useRef(0);
+  const lastTelemetryAtRef = useRef(0);
+  const lastReportedDriftRef = useRef<number | null>(null);
+  const lastPlayerStateRef = useRef<number | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
 
   useEffect(() => {
     autoplayBlockedRef.current = onAutoplayBlocked;
     readyChangeRef.current = onReadyChange;
-  }, [onAutoplayBlocked, onReadyChange]);
+    endedRef.current = onEnded;
+  }, [onAutoplayBlocked, onReadyChange, onEnded]);
 
   useImperativeHandle(refHandle, () => ({
     getCurrentTime: () => playerRef.current?.getCurrentTime?.() ?? 0,
@@ -92,7 +99,7 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
       player.playVideo();
       window.setTimeout(() => {
         if (playbackRef.current.status === 'paused') player.pauseVideo();
-      }, 220);
+      }, 180);
     },
     seekLocal: seconds => playerRef.current?.seekTo?.(seconds, true)
   }));
@@ -120,6 +127,10 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
             }
           },
           onStateChange: (event: YT.OnStateChangeEvent) => {
+            lastPlayerStateRef.current = event.data;
+            if (event.data === 3) lastBufferingAtRef.current = Date.now();
+            if (event.data === 0) endedRef.current?.();
+
             const currentTrack = trackRef.current;
             if (currentTrack && [1, 2, 5].includes(event.data)) {
               void updateParticipant(roomCode, uid, {
@@ -146,6 +157,9 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
   useEffect(() => {
     trackRef.current = track;
     if (!playerReady || !track || !playerRef.current) return;
+    lastTelemetryAtRef.current = 0;
+    lastReportedDriftRef.current = null;
+    correctionRef.current = 0;
     playerRef.current.cueVideoById({ videoId: track.videoId, startSeconds: 0 });
     void updateParticipant(roomCode, uid, { readyFor: '', driftMs: 0 });
   }, [track?.videoId, playerReady, roomCode, uid]);
@@ -162,7 +176,13 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
       const now = serverNow();
       const elapsed = Math.max(0, now - state.executeAt) / 1000;
       const target = Math.max(0, state.position + (state.status === 'playing' ? elapsed : 0));
-      player.seekTo(target, true);
+      const actual = player.getCurrentTime();
+      const seekThreshold = state.status === 'playing' ? 0.4 : 0.2;
+
+      if (!Number.isFinite(actual) || Math.abs(actual - target) > seekThreshold) {
+        player.seekTo(target, true);
+      }
+
       if (state.status === 'playing') player.playVideo();
       else player.pauseVideo();
     };
@@ -185,14 +205,33 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
       const actual = player.getCurrentTime();
       const drift = actual - expected;
       const driftMs = Math.round(drift * 1000);
-      void updateParticipant(roomCode, uid, { driftMs, playerState: player.getPlayerState() });
+      const now = Date.now();
 
-      const settling = Date.now() - commandStartRef.current < 8000;
-      const threshold = settling ? 0.3 : 0.5;
-      const cooldown = settling ? 2500 : 6000;
+      const telemetryDue = now - lastTelemetryAtRef.current > 5000;
+      const changedMeaningfully =
+        lastReportedDriftRef.current === null ||
+        Math.abs(driftMs - lastReportedDriftRef.current) > 250;
 
-      if (Math.abs(drift) > threshold && Date.now() - correctionRef.current > cooldown) {
-        correctionRef.current = Date.now();
+      if (telemetryDue || Math.abs(driftMs) > 1500 || changedMeaningfully && now - lastTelemetryAtRef.current > 2500) {
+        lastTelemetryAtRef.current = now;
+        lastReportedDriftRef.current = driftMs;
+        void updateParticipant(roomCode, uid, {
+          driftMs,
+          playerState: lastPlayerStateRef.current ?? player.getPlayerState()
+        });
+      }
+
+      const recentlyBuffered = now - lastBufferingAtRef.current < 4500;
+      const settling = now - commandStartRef.current < 6000;
+      const threshold = settling ? 0.8 : 1.15;
+      const cooldown = settling ? 8000 : 12000;
+
+      if (
+        !recentlyBuffered &&
+        Math.abs(drift) > threshold &&
+        now - correctionRef.current > cooldown
+      ) {
+        correctionRef.current = now;
         player.seekTo(expected, true);
       }
     }, 1200);
