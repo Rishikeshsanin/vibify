@@ -1,52 +1,58 @@
-# Vibify Roadmap
+# Vibify V2 Roadmap
 
-Vibify is currently focused on proving one thing extremely well: **shared listening that stays together across phones and laptops.**
+Vibify V1 proved the core idea: a host creates a room, friends join from phones or laptops, and everyone follows one shared playback timeline.
 
-This roadmap keeps future work ordered around that goal instead of turning the project into a generic music clone.
+Real-world testing also exposed the limitation we care about most: **some multi-user sessions can still buffer or stutter** because browser media behavior, YouTube buffering, device performance, network conditions, and synchronization corrections are not fully under our control.
 
-## Phase 1 — Core shared listening ✅
+V2 starts from those lessons instead of treating them as small bugs.
 
-- [x] Create room
-- [x] Join with 6-character code
-- [x] Anonymous participants
-- [x] Host authority
-- [x] Responsive desktop + mobile UI
-- [x] YouTube search
-- [x] YouTube IFrame playback
-- [x] Play / pause
-- [x] Seek
-- [x] ±10 second controls
-- [x] Presence
-- [x] Ready state
-- [x] Live drift reporting
-- [x] Automatic hard correction for meaningful drift
-- [x] Shareable room links
-- [x] Production deployment
+## V2 goals
 
-## Phase 2 — Sync quality
+The next version should feel:
 
-- [ ] Better buffering-state recovery
-- [ ] Adaptive correction thresholds
-- [ ] Join-in-progress recovery polish
-- [ ] Network reconnect recovery
-- [ ] Device sync score
-- [ ] Per-device health diagnostics
-- [ ] More detailed sync telemetry for debugging
-- [ ] Multi-device automated test harness
+- more reliable
+- more professional
+- more intentional
+- easier to understand
+- more fun with friends
+- less like a technical sync experiment
 
-## Phase 3 — Jam-style collaboration
+## Playback and reliability
+
+- [ ] Re-evaluate the synchronization strategy
+- [ ] Improve buffering-state handling
+- [ ] Improve join-in-progress recovery
+- [ ] Improve reconnect recovery
+- [ ] Reduce audible interruptions during corrections
+- [ ] Add useful device-health diagnostics
+- [ ] Add practical sync telemetry without over-correcting playback
+- [ ] Build a repeatable multi-device test process
+- [ ] Test across desktop Chrome/Edge, iPhone Safari/Chrome, and Android Chrome
+
+## Product redesign
+
+- [ ] Redesign the room around a clearer music-first workflow
+- [ ] Improve host/guest role clarity
+- [ ] Better loading, ready, buffering, reconnect, and error states
+- [ ] Cleaner desktop layout
+- [ ] Cleaner mobile layout
+- [ ] Better onboarding and room sharing
+- [ ] Better empty states and recovery flows
+
+## Jam-style collaboration
 
 - [ ] Guest-added queue
-- [ ] Host setting: allow / disallow guest additions
+- [ ] Host setting for guest song additions
 - [ ] Song voting
-- [ ] Remove / reorder queue
+- [ ] Reorder queue
+- [ ] Remove songs from queue
 - [ ] Transfer host
 - [ ] Host migration after disconnect
 - [ ] Room reactions
 - [ ] Participant nicknames / avatars
 - [ ] QR-code joining
 
-## Phase 4 — Music experience
+## Music experience
 
 - [ ] Next-track pre-cueing
 - [ ] Recently played
@@ -56,40 +62,34 @@ This roadmap keeps future work ordered around that goal instead of turning the p
 - [ ] Playlist-like room queues
 - [ ] Room session summary
 
-## Phase 5 — Provider architecture
+## Provider architecture
 
 - [ ] Generic player/provider interface
-- [ ] YouTube provider cleanup
+- [ ] Clean up YouTube provider implementation
 - [ ] Evaluate additional providers with compatible terms
 - [ ] Provider-specific fallback handling
 
-The provider layer should never compromise the core rule: every participant streams their own legitimate playback source while Vibify synchronizes room state.
+Every participant should continue to stream from a legitimate playback source. Vibify should synchronize room state, not become an audio re-streaming layer.
 
-## Phase 6 — Installable / native experience
+## Installable / native direction
 
 - [ ] PWA manifest
 - [ ] Installable web app
-- [ ] Better mobile media-session integration
+- [ ] Better Media Session integration
 - [ ] Background playback research
 - [ ] Native Android proof of concept
 - [ ] Native iOS feasibility study
 
-## Non-goals for now
+## V2 product principle
 
-These are intentionally not priorities:
+Every major decision should pass this test:
 
-- re-streaming copyrighted audio from the host
-- extracting YouTube audio into custom MP3 streams
-- building a full social network
-- heavy user-profile/account systems
-- sample-accurate Bluetooth speaker-array synchronization
-
-Vibify is a **shared listening room**, not an audio piracy layer or distributed PA system.
-
-## Product principle
-
-Every roadmap decision should pass this test:
-
-> Does this make it easier, smoother, or more fun for a group of people to hear the same song together?
+> Does this make shared listening smoother, more reliable, more professional, or more fun for a group of friends?
 
 If not, it can wait.
+
+## Current status
+
+`2.0.0-alpha.0` — planning and architecture stage.
+
+The next step is to collect the new V2 ideas before changing the product architecture.
