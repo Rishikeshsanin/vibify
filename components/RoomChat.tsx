@@ -1,6 +1,6 @@
 'use client';
 
-import { MessageCircle, Send, Smile } from 'lucide-react';
+import { Eye, EyeOff, MessageCircle, Send, Smile } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   removeChatMessage,
@@ -12,6 +12,7 @@ import {
 import type { ChatMessage, Participant, ReactionEvent } from '@/lib/types';
 
 const REACTIONS = ['🔥', '❤️', '😂', '✨', '🎧', '🫶'];
+const FLOATING_REACTIONS_KEY = 'vibify-floating-reactions';
 
 type Props = {
   roomCode: string;
@@ -24,11 +25,26 @@ export function RoomChat({ roomCode, uid, name, participants }: Props) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [now, setNow] = useState(() => serverNow());
+  const [floatingReactions, setFloatingReactions] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(serverNow()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(FLOATING_REACTIONS_KEY);
+    if (stored === 'off') {
+      setFloatingReactions(false);
+      return;
+    }
+    if (stored === 'on') return;
+
+    // Respect reduced-motion users by default, while still letting them opt in.
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setFloatingReactions(false);
+    }
   }, []);
 
   const messages = useMemo(() => {
@@ -42,6 +58,7 @@ export function RoomChat({ roomCode, uid, name, participants }: Props) {
   }, [participants, now]);
 
   const reactions = useMemo(() => {
+    if (!floatingReactions) return [];
     const all: ReactionEvent[] = [];
     participants.forEach(participant => {
       Object.values(participant.reactions ?? {}).forEach(reaction => {
@@ -49,7 +66,7 @@ export function RoomChat({ roomCode, uid, name, participants }: Props) {
       });
     });
     return all.sort((a, b) => a.createdAt - b.createdAt);
-  }, [participants, now]);
+  }, [participants, now, floatingReactions]);
 
   useEffect(() => {
     const node = listRef.current;
@@ -89,15 +106,47 @@ export function RoomChat({ roomCode, uid, name, participants }: Props) {
     }
   };
 
+  const toggleFloatingReactions = () => {
+    setFloatingReactions(current => {
+      const next = !current;
+      window.localStorage.setItem(FLOATING_REACTIONS_KEY, next ? 'on' : 'off');
+      return next;
+    });
+  };
+
   return (
     <>
       <section className="glass vibe-chat">
         <header className="vibe-chat-head">
-          <div>
+          <div className="vibe-chat-title">
             <span className="eyebrow"><MessageCircle size={13}/> VIBE CHAT</span>
             <h3>Room chat</h3>
           </div>
-          <span className="chat-ttl">10 MIN</span>
+
+          <div className="vibe-chat-head-actions">
+            <button
+              type="button"
+              className={`reaction-visibility-toggle ${floatingReactions ? '' : 'is-muted'}`}
+              onClick={toggleFloatingReactions}
+              aria-pressed={!floatingReactions}
+              title={floatingReactions ? 'Hide floating emoji reactions on this device' : 'Show floating emoji reactions on this device'}
+            >
+              {floatingReactions ? <EyeOff size={16}/> : <Eye size={16}/>}
+              <span>
+                <b>{floatingReactions ? 'Calm the vibe' : 'Reactions off'}</b>
+                <small>{floatingReactions ? 'Hide floating emojis' : 'Show floating emojis'}</small>
+              </span>
+            </button>
+
+            <span
+              className="chat-ttl"
+              tabIndex={0}
+              data-tooltip="Messages disappear 10 minutes after they are sent — keeping the room fresh and in the moment."
+              aria-label="Messages disappear 10 minutes after they are sent"
+            >
+              10 MIN
+            </span>
+          </div>
         </header>
 
         <div className="vibe-messages" ref={listRef}>
@@ -136,17 +185,19 @@ export function RoomChat({ roomCode, uid, name, participants }: Props) {
         </form>
       </section>
 
-      <div className="reaction-layer" aria-hidden="true">
-        {reactions.map(reaction => (
-          <span
-            key={reaction.id}
-            className={`reaction-burst lane-${hashLane(reaction.id)}`}
-            title={reaction.name}
-          >
-            {reaction.emoji}
-          </span>
-        ))}
-      </div>
+      {floatingReactions && (
+        <div className="reaction-layer" aria-hidden="true">
+          {reactions.map(reaction => (
+            <span
+              key={reaction.id}
+              className={`reaction-burst lane-${hashLane(reaction.id)}`}
+              title={reaction.name}
+            >
+              {reaction.emoji}
+            </span>
+          ))}
+        </div>
+      )}
     </>
   );
 }
