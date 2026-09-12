@@ -43,4 +43,5 @@ export type Room = {
   playback: PlaybackState;
   participants?: Record<string, Participant>;
   queue?: Record<string, QueueItem>;
+  lyricsOffsetMs?: number;
 };
