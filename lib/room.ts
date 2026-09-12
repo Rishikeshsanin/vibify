@@ -10,7 +10,7 @@ import {
   update
 } from 'firebase/database';
 import { db, ensureAnonymousUser } from './firebase';
-import type { Participant, PlaybackState, Room, Track } from './types';
+import type { Participant, PlaybackState, QueueItem, Room, Track } from './types';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
@@ -114,7 +114,7 @@ export async function setTrack(code: string, track: Track, version: number) {
   const now = serverNow();
   await update(ref(db, `rooms/${code}`), {
     track,
-    playback: { status: 'paused', position: 0, executeAt: now + 500, version: version + 1 }
+    playback: { status: 'paused', position: 0, executeAt: now + 450, version: version + 1 }
   });
 }
 
@@ -126,4 +126,59 @@ export async function writePlayback(code: string, playback: PlaybackState) {
 export async function updateParticipant(code: string, uid: string, patch: Partial<Participant>) {
   if (!db) return;
   await update(ref(db, `rooms/${code}/participants/${uid}`), patch);
+}
+
+export async function addToQueue(
+  code: string,
+  track: Track,
+  addedBy: string,
+  addedByName: string
+) {
+  if (!db) throw new Error('Firebase is not configured.');
+  const now = serverNow();
+  const id = `${Math.round(now).toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const item: QueueItem = {
+    id,
+    track,
+    addedBy,
+    addedByName,
+    addedAt: now,
+    order: now
+  };
+  await set(ref(db, `rooms/${code}/queue/${id}`), item);
+  return item;
+}
+
+export async function removeQueueItem(code: string, itemId: string) {
+  if (!db) throw new Error('Firebase is not configured.');
+  await remove(ref(db, `rooms/${code}/queue/${itemId}`));
+}
+
+export async function reorderQueue(code: string, items: QueueItem[]) {
+  if (!db) throw new Error('Firebase is not configured.');
+  const patch: Record<string, number> = {};
+  items.forEach((item, index) => {
+    patch[`queue/${item.id}/order`] = index;
+  });
+  await update(ref(db, `rooms/${code}`), patch);
+}
+
+export async function playQueueItem(
+  code: string,
+  item: QueueItem,
+  version: number,
+  autoplay = true
+) {
+  if (!db) throw new Error('Firebase is not configured.');
+  const now = serverNow();
+  await update(ref(db, `rooms/${code}`), {
+    track: item.track,
+    playback: {
+      status: autoplay ? 'playing' : 'paused',
+      position: 0,
+      executeAt: now + (autoplay ? 950 : 450),
+      version: version + 1
+    },
+    [`queue/${item.id}`]: null
+  });
 }
