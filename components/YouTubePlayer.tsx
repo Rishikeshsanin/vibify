@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { serverNow, updateParticipant } from '@/lib/room';
+import { roomPlaybackPosition, serverNow, updateParticipant } from '@/lib/room';
 import type { PlaybackState, Track } from '@/lib/types';
 
 declare global {
@@ -31,6 +31,7 @@ export type YouTubeHandle = {
   getPlayerState: () => number;
   unlockAudio: () => void;
   seekLocal: (seconds: number) => void;
+  syncToRoom: () => void;
 };
 
 type Props = {
@@ -41,6 +42,7 @@ type Props = {
   onAutoplayBlocked?: () => void;
   onReadyChange?: (ready: boolean) => void;
   onPlayerStateChange?: (state: number) => void;
+  onFollowingRoomChange?: (following: boolean) => void;
   onEnded?: () => void;
 };
 
@@ -67,7 +69,17 @@ function loadYouTubeAPI() {
 }
 
 export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePlayer(
-  { roomCode, uid, track, playback, onAutoplayBlocked, onReadyChange, onPlayerStateChange, onEnded },
+  {
+    roomCode,
+    uid,
+    track,
+    playback,
+    onAutoplayBlocked,
+    onReadyChange,
+    onPlayerStateChange,
+    onFollowingRoomChange,
+    onEnded
+  },
   refHandle
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -76,23 +88,53 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
   const playbackRef = useRef(playback);
   const correctionRef = useRef(0);
   const commandStartRef = useRef(Date.now());
+  const roomCommandGraceRef = useRef(0);
   const commandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoplayBlockedRef = useRef(onAutoplayBlocked);
   const readyChangeRef = useRef(onReadyChange);
   const playerStateChangeRef = useRef(onPlayerStateChange);
+  const followingChangeRef = useRef(onFollowingRoomChange);
   const endedRef = useRef(onEnded);
   const lastBufferingAtRef = useRef(0);
   const lastTelemetryAtRef = useRef(0);
   const lastReportedDriftRef = useRef<number | null>(null);
   const lastPlayerStateRef = useRef<number | null>(null);
+  const followingRoomRef = useRef(true);
   const [playerReady, setPlayerReady] = useState(false);
 
   useEffect(() => {
     autoplayBlockedRef.current = onAutoplayBlocked;
     readyChangeRef.current = onReadyChange;
     playerStateChangeRef.current = onPlayerStateChange;
+    followingChangeRef.current = onFollowingRoomChange;
     endedRef.current = onEnded;
-  }, [onAutoplayBlocked, onReadyChange, onPlayerStateChange, onEnded]);
+  }, [onAutoplayBlocked, onReadyChange, onPlayerStateChange, onFollowingRoomChange, onEnded]);
+
+  const setFollowingRoom = (following: boolean) => {
+    if (followingRoomRef.current === following) return;
+    followingRoomRef.current = following;
+    followingChangeRef.current?.(following);
+    void updateParticipant(roomCode, uid, { followingRoom: following });
+  };
+
+  const applyRoomState = () => {
+    const player = playerRef.current;
+    const state = playbackRef.current;
+    if (!player || !trackRef.current) return;
+
+    const target = roomPlaybackPosition(state);
+    const actual = player.getCurrentTime();
+    roomCommandGraceRef.current = Date.now() + 1800;
+    commandStartRef.current = Date.now();
+    setFollowingRoom(true);
+
+    if (!Number.isFinite(actual) || Math.abs(actual - target) > 0.22) {
+      player.seekTo(target, true);
+    }
+
+    if (state.status === 'playing') player.playVideo();
+    else player.pauseVideo();
+  };
 
   useImperativeHandle(refHandle, () => ({
     getCurrentTime: () => playerRef.current?.getCurrentTime?.() ?? 0,
@@ -101,12 +143,14 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
     unlockAudio: () => {
       const player = playerRef.current;
       if (!player || !trackRef.current) return;
+      roomCommandGraceRef.current = Date.now() + 1200;
       player.playVideo();
       window.setTimeout(() => {
         if (playbackRef.current.status === 'paused') player.pauseVideo();
       }, 180);
     },
-    seekLocal: seconds => playerRef.current?.seekTo?.(seconds, true)
+    seekLocal: seconds => playerRef.current?.seekTo?.(seconds, true),
+    syncToRoom: applyRoomState
   }));
 
   useEffect(() => {
@@ -118,8 +162,8 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
         height: '100%',
         playerVars: {
           playsinline: 1,
-          controls: 0,
-          disablekb: 1,
+          controls: 1,
+          disablekb: 0,
           rel: 0,
           modestbranding: 1,
           origin: window.location.origin
@@ -128,24 +172,38 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
           onReady: () => {
             setPlayerReady(true);
             readyChangeRef.current?.(true);
+            followingChangeRef.current?.(true);
             if (trackRef.current) {
               playerRef.current?.cueVideoById({ videoId: trackRef.current.videoId, startSeconds: 0 });
             }
           },
           onStateChange: (event: YT.OnStateChangeEvent) => {
+            const now = Date.now();
             lastPlayerStateRef.current = event.data;
             playerStateChangeRef.current?.(event.data);
-            if (event.data === 3) lastBufferingAtRef.current = Date.now();
-            if (event.data === 0) endedRef.current?.();
+            if (event.data === 3) lastBufferingAtRef.current = now;
+
+            const state = playbackRef.current;
+            const outsideRoomCommand = now > roomCommandGraceRef.current;
+            if (outsideRoomCommand) {
+              if (event.data === 2 && state.status === 'playing') setFollowingRoom(false);
+              if (event.data === 1 && state.status === 'paused') setFollowingRoom(false);
+            }
+
+            if (event.data === 0 && followingRoomRef.current) endedRef.current?.();
 
             const currentTrack = trackRef.current;
             if (currentTrack && [1, 2, 5].includes(event.data)) {
               void updateParticipant(roomCode, uid, {
                 readyFor: currentTrack.videoId,
-                playerState: event.data
+                playerState: event.data,
+                followingRoom: followingRoomRef.current
               });
             } else {
-              void updateParticipant(roomCode, uid, { playerState: event.data });
+              void updateParticipant(roomCode, uid, {
+                playerState: event.data,
+                followingRoom: followingRoomRef.current
+              });
             }
           },
           onAutoplayBlocked: () => autoplayBlockedRef.current?.()
@@ -167,8 +225,15 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
     lastTelemetryAtRef.current = 0;
     lastReportedDriftRef.current = null;
     correctionRef.current = 0;
+    followingRoomRef.current = true;
+    followingChangeRef.current?.(true);
+    roomCommandGraceRef.current = Date.now() + 1800;
     playerRef.current.cueVideoById({ videoId: track.videoId, startSeconds: 0 });
-    void updateParticipant(roomCode, uid, { readyFor: '', driftMs: 0 });
+    void updateParticipant(roomCode, uid, {
+      readyFor: '',
+      driftMs: 0,
+      followingRoom: true
+    });
   }, [track?.videoId, playerReady, roomCode, uid]);
 
   useEffect(() => {
@@ -178,22 +243,7 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
     if (!playerReady || !track?.videoId || !player) return;
     if (commandTimerRef.current) clearTimeout(commandTimerRef.current);
 
-    const apply = () => {
-      const state = playbackRef.current;
-      const now = serverNow();
-      const elapsed = Math.max(0, now - state.executeAt) / 1000;
-      const target = Math.max(0, state.position + (state.status === 'playing' ? elapsed : 0));
-      const actual = player.getCurrentTime();
-      const seekThreshold = state.status === 'playing' ? 0.4 : 0.2;
-
-      if (!Number.isFinite(actual) || Math.abs(actual - target) > seekThreshold) {
-        player.seekTo(target, true);
-      }
-
-      if (state.status === 'playing') player.playVideo();
-      else player.pauseVideo();
-    };
-
+    const apply = () => applyRoomState();
     const delay = Math.max(0, playback.executeAt - serverNow());
     commandTimerRef.current = setTimeout(apply, delay);
     return () => {
@@ -206,42 +256,63 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
     const interval = window.setInterval(() => {
       const player = playerRef.current;
       const state = playbackRef.current;
-      if (!player || state.status !== 'playing' || player.getPlayerState() !== 1) return;
+      if (!player) return;
 
-      const expected = Math.max(0, state.position + Math.max(0, serverNow() - state.executeAt) / 1000);
+      const expected = roomPlaybackPosition(state);
       const actual = player.getCurrentTime();
+      if (!Number.isFinite(actual)) return;
       const drift = actual - expected;
       const driftMs = Math.round(drift * 1000);
       const now = Date.now();
+      const playerState = player.getPlayerState();
 
-      const telemetryDue = now - lastTelemetryAtRef.current > 5000;
+      const telemetryDue = now - lastTelemetryAtRef.current > 4200;
       const changedMeaningfully =
         lastReportedDriftRef.current === null ||
-        Math.abs(driftMs - lastReportedDriftRef.current) > 250;
+        Math.abs(driftMs - lastReportedDriftRef.current) > 400;
 
-      if (telemetryDue || Math.abs(driftMs) > 1500 || changedMeaningfully && now - lastTelemetryAtRef.current > 2500) {
+      if (telemetryDue || Math.abs(driftMs) > 1800 || (changedMeaningfully && now - lastTelemetryAtRef.current > 2400)) {
         lastTelemetryAtRef.current = now;
         lastReportedDriftRef.current = driftMs;
         void updateParticipant(roomCode, uid, {
           driftMs,
-          playerState: lastPlayerStateRef.current ?? player.getPlayerState()
+          playerState,
+          followingRoom: followingRoomRef.current
         });
       }
 
-      const recentlyBuffered = now - lastBufferingAtRef.current < 4500;
-      const settling = now - commandStartRef.current < 6000;
-      const threshold = settling ? 0.8 : 1.15;
-      const cooldown = settling ? 8000 : 12000;
+      const recentlyBuffered = now - lastBufferingAtRef.current < 6000;
+      const outsideCommand = now > roomCommandGraceRef.current;
 
+      if (
+        followingRoomRef.current &&
+        state.status === 'playing' &&
+        outsideCommand &&
+        !recentlyBuffered &&
+        Math.abs(drift) > 2.2
+      ) {
+        // A large jump outside a host command is almost always a deliberate
+        // native YouTube seek/pause or a device that fell far behind. Preserve
+        // the listener's local position and offer a one-tap catch-up instead.
+        setFollowingRoom(false);
+        return;
+      }
+
+      if (!followingRoomRef.current || state.status !== 'playing' || playerState !== 1) return;
+
+      const settling = now - commandStartRef.current < 6000;
+      const threshold = settling ? 0.85 : 1.2;
+      const cooldown = settling ? 8000 : 12000;
       if (
         !recentlyBuffered &&
         Math.abs(drift) > threshold &&
         now - correctionRef.current > cooldown
       ) {
         correctionRef.current = now;
+        roomCommandGraceRef.current = now + 1400;
         player.seekTo(expected, true);
       }
-    }, 1200);
+    }, 1000);
     return () => clearInterval(interval);
   }, [playerReady, roomCode, track?.videoId, uid]);
 
