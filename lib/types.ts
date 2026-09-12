@@ -13,6 +13,24 @@ export type PlaybackState = {
   version: number;
 };
 
+export type ChatMessage = {
+  id: string;
+  uid: string;
+  name: string;
+  text: string;
+  createdAt: number;
+  expiresAt: number;
+};
+
+export type ReactionEvent = {
+  id: string;
+  uid: string;
+  name: string;
+  emoji: string;
+  createdAt: number;
+  expiresAt: number;
+};
+
 export type Participant = {
   uid: string;
   name: string;
@@ -22,6 +40,9 @@ export type Participant = {
   readyFor?: string;
   playerState?: number;
   driftMs?: number;
+  followingRoom?: boolean;
+  messages?: Record<string, ChatMessage>;
+  reactions?: Record<string, ReactionEvent>;
   joinedAt?: number;
 };
 
