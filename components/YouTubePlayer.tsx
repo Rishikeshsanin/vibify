@@ -28,6 +28,7 @@ declare global {
 export type YouTubeHandle = {
   getCurrentTime: () => number;
   getDuration: () => number;
+  getPlayerState: () => number;
   unlockAudio: () => void;
   seekLocal: (seconds: number) => void;
 };
@@ -39,6 +40,7 @@ type Props = {
   playback: PlaybackState;
   onAutoplayBlocked?: () => void;
   onReadyChange?: (ready: boolean) => void;
+  onPlayerStateChange?: (state: number) => void;
   onEnded?: () => void;
 };
 
@@ -65,7 +67,7 @@ function loadYouTubeAPI() {
 }
 
 export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePlayer(
-  { roomCode, uid, track, playback, onAutoplayBlocked, onReadyChange, onEnded },
+  { roomCode, uid, track, playback, onAutoplayBlocked, onReadyChange, onPlayerStateChange, onEnded },
   refHandle
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -77,6 +79,7 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
   const commandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoplayBlockedRef = useRef(onAutoplayBlocked);
   const readyChangeRef = useRef(onReadyChange);
+  const playerStateChangeRef = useRef(onPlayerStateChange);
   const endedRef = useRef(onEnded);
   const lastBufferingAtRef = useRef(0);
   const lastTelemetryAtRef = useRef(0);
@@ -87,12 +90,14 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
   useEffect(() => {
     autoplayBlockedRef.current = onAutoplayBlocked;
     readyChangeRef.current = onReadyChange;
+    playerStateChangeRef.current = onPlayerStateChange;
     endedRef.current = onEnded;
-  }, [onAutoplayBlocked, onReadyChange, onEnded]);
+  }, [onAutoplayBlocked, onReadyChange, onPlayerStateChange, onEnded]);
 
   useImperativeHandle(refHandle, () => ({
     getCurrentTime: () => playerRef.current?.getCurrentTime?.() ?? 0,
     getDuration: () => playerRef.current?.getDuration?.() ?? 0,
+    getPlayerState: () => playerRef.current?.getPlayerState?.() ?? -1,
     unlockAudio: () => {
       const player = playerRef.current;
       if (!player || !trackRef.current) return;
@@ -113,7 +118,8 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
         height: '100%',
         playerVars: {
           playsinline: 1,
-          controls: 1,
+          controls: 0,
+          disablekb: 1,
           rel: 0,
           modestbranding: 1,
           origin: window.location.origin
@@ -128,6 +134,7 @@ export const YouTubePlayer = forwardRef<YouTubeHandle, Props>(function YouTubePl
           },
           onStateChange: (event: YT.OnStateChangeEvent) => {
             lastPlayerStateRef.current = event.data;
+            playerStateChangeRef.current?.(event.data);
             if (event.data === 3) lastBufferingAtRef.current = Date.now();
             if (event.data === 0) endedRef.current?.();
 
