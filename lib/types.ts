@@ -13,6 +13,24 @@ export type PlaybackState = {
   version: number;
 };
 
+export type ChatMessage = {
+  id: string;
+  uid: string;
+  name: string;
+  text: string;
+  createdAt: number;
+  expiresAt: number;
+};
+
+export type ReactionEvent = {
+  id: string;
+  uid: string;
+  name: string;
+  emoji: string;
+  createdAt: number;
+  expiresAt: number;
+};
+
 export type Participant = {
   uid: string;
   name: string;
@@ -22,7 +40,19 @@ export type Participant = {
   readyFor?: string;
   playerState?: number;
   driftMs?: number;
+  followingRoom?: boolean;
+  messages?: Record<string, ChatMessage>;
+  reactions?: Record<string, ReactionEvent>;
   joinedAt?: number;
+};
+
+export type QueueItem = {
+  id: string;
+  track: Track;
+  addedBy: string;
+  addedByName: string;
+  addedAt: number;
+  order: number;
 };
 
 export type Room = {
@@ -33,4 +63,6 @@ export type Room = {
   track?: Track;
   playback: PlaybackState;
   participants?: Record<string, Participant>;
+  queue?: Record<string, QueueItem>;
+  lyricsOffsetMs?: number;
 };
