@@ -25,6 +25,15 @@ export type Participant = {
   joinedAt?: number;
 };
 
+export type QueueItem = {
+  id: string;
+  track: Track;
+  addedBy: string;
+  addedByName: string;
+  addedAt: number;
+  order: number;
+};
+
 export type Room = {
   code: string;
   hostUid: string;
@@ -33,4 +42,5 @@ export type Room = {
   track?: Track;
   playback: PlaybackState;
   participants?: Record<string, Participant>;
+  queue?: Record<string, QueueItem>;
 };
