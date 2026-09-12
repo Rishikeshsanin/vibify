@@ -1,0 +1,122 @@
+/* V2 reliability + room-synced lyrics refinements. */
+
+/* The Vibify transport is the single playback control surface. Keeping the
+   YouTube iframe non-interactive prevents its internal controls from drifting
+   away from the Firebase room state. */
+.youtube-frame,
+.youtube-frame iframe {
+  pointer-events: none !important;
+  user-select: none;
+}
+
+.lyrics-sync-strip {
+  margin: 0 28px;
+  padding: 12px 0 13px;
+  border-top: 1px solid rgba(255,255,255,.07);
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.lyrics-sync-strip > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.lyrics-sync-strip b {
+  color: #c8ff42;
+  font-size: 9px;
+  letter-spacing: .14em;
+}
+
+.lyrics-sync-strip span {
+  color: #758193;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.lyrics-calibration {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.lyrics-calibration button {
+  min-width: 38px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 9px;
+  background: rgba(255,255,255,.04);
+  color: #aeb8c7;
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+
+.lyrics-calibration button:hover {
+  border-color: rgba(200,255,66,.28);
+  background: rgba(200,255,66,.07);
+  color: #eaffb8;
+}
+
+.lyrics-calibration .lyrics-reset {
+  min-width: 32px;
+  width: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.lyrics-shared-note {
+  flex: 0 0 auto;
+  color: #778497 !important;
+  font-size: 9px !important;
+}
+
+.lyrics-window {
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  scroll-padding-block: 35%;
+}
+
+.synced-lyrics {
+  scroll-margin: 0;
+}
+
+.lyric-line {
+  scroll-margin-block: 35%;
+}
+
+@media (max-width: 760px) {
+  .lyrics-sync-strip {
+    margin: 0 18px;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .lyrics-calibration {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+  }
+
+  .lyrics-calibration button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .lyrics-calibration .lyrics-reset {
+    width: 100%;
+  }
+
+  .lyrics-shared-note {
+    white-space: normal;
+  }
+}
