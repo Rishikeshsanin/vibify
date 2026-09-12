@@ -9,6 +9,7 @@ import {
   Music2,
   Play,
   Plus,
+  RotateCcw,
   Trash2
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -20,6 +21,10 @@ type LyricsPayload = {
   trackName?: string;
   artistName?: string;
   albumName?: string;
+  duration?: number | null;
+  videoDuration?: number | null;
+  durationDelta?: number | null;
+  confidence?: number;
   plainLyrics?: string | null;
   syncedLyrics?: string | null;
   source?: string;
@@ -33,10 +38,12 @@ type LyricLine = {
 
 type Props = {
   track?: Track;
-  currentTime: number;
+  roomTime: number;
   duration: number;
   queue: QueueItem[];
   isHost: boolean;
+  lyricsOffsetMs: number;
+  onLyricsOffsetChange: (offsetMs: number) => void;
   onOpenSearch: () => void;
   onPlay: (item: QueueItem) => void;
   onRemove: (item: QueueItem) => void;
@@ -45,10 +52,12 @@ type Props = {
 
 export function RoomFeatures({
   track,
-  currentTime,
+  roomTime,
   duration,
   queue,
   isHost,
+  lyricsOffsetMs,
+  onLyricsOffsetChange,
   onOpenSearch,
   onPlay,
   onRemove,
@@ -58,6 +67,8 @@ export function RoomFeatures({
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [lyricsError, setLyricsError] = useState('');
   const lineRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const lyricsWindowRef = useRef<HTMLDivElement>(null);
+  const durationKey = duration > 1 ? Math.round(duration) : 0;
 
   useEffect(() => {
     if (!track) {
@@ -71,29 +82,34 @@ export function RoomFeatures({
     setLyricsError('');
     setLyricsLoading(true);
 
-    const params = new URLSearchParams({
-      title: track.title,
-      artist: track.channelTitle
-    });
-    if (duration > 1) params.set('duration', String(Math.round(duration)));
-
-    fetch(`/api/lyrics?${params}`, { signal: controller.signal })
-      .then(async response => {
-        const data = (await response.json()) as LyricsPayload;
-        if (!response.ok) throw new Error(data.error ?? 'Lyrics lookup failed.');
-        return data;
-      })
-      .then(data => setLyrics(data))
-      .catch(error => {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
-        setLyricsError(error instanceof Error ? error.message : 'Lyrics are unavailable.');
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLyricsLoading(false);
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({
+        title: track.title,
+        artist: track.channelTitle
       });
+      if (durationKey > 0) params.set('duration', String(durationKey));
 
-    return () => controller.abort();
-  }, [track?.videoId]);
+      fetch(`/api/lyrics?${params}`, { signal: controller.signal })
+        .then(async response => {
+          const data = (await response.json()) as LyricsPayload;
+          if (!response.ok) throw new Error(data.error ?? 'Lyrics lookup failed.');
+          return data;
+        })
+        .then(data => setLyrics(data))
+        .catch(error => {
+          if (error instanceof DOMException && error.name === 'AbortError') return;
+          setLyricsError(error instanceof Error ? error.message : 'Lyrics are unavailable.');
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLyricsLoading(false);
+        });
+    }, durationKey > 0 ? 80 : 900);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [track?.videoId, durationKey]);
 
   const syncedLines = useMemo(
     () => parseSyncedLyrics(lyrics?.syncedLyrics ?? ''),
@@ -105,20 +121,37 @@ export function RoomFeatures({
     [lyrics?.plainLyrics]
   );
 
+  const lyricsClock = Math.max(0, roomTime - lyricsOffsetMs / 1000);
+
   const activeLine = useMemo(() => {
     if (!syncedLines.length) return -1;
     let index = -1;
     for (let i = 0; i < syncedLines.length; i += 1) {
-      if (syncedLines[i].time <= currentTime + 0.12) index = i;
+      if (syncedLines[i].time <= lyricsClock + 0.08) index = i;
       else break;
     }
     return index;
-  }, [currentTime, syncedLines]);
+  }, [lyricsClock, syncedLines]);
 
   useEffect(() => {
     if (activeLine < 0) return;
-    lineRefs.current[activeLine]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const container = lyricsWindowRef.current;
+    const line = lineRefs.current[activeLine];
+    if (!container || !line) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const lineRect = line.getBoundingClientRect();
+    const target =
+      container.scrollTop +
+      (lineRect.top - containerRect.top) -
+      container.clientHeight / 2 +
+      lineRect.height / 2;
+
+    container.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
   }, [activeLine]);
+
+  const durationDelta = typeof lyrics?.durationDelta === 'number' ? lyrics.durationDelta : null;
+  const timingMismatch = durationDelta !== null && Math.abs(durationDelta) >= 4;
 
   return (
     <section className="room-features">
@@ -132,12 +165,32 @@ export function RoomFeatures({
           {lyrics?.source && <span className="feature-chip">{lyrics.source}</span>}
         </header>
 
-        <div className="lyrics-window">
+        {syncedLines.length > 0 && (
+          <div className="lyrics-sync-strip">
+            <div>
+              <b>ROOM-SYNCED LYRICS</b>
+              <span>{formatOffset(lyricsOffsetMs)}{timingMismatch ? ` · video differs by ${formatDelta(durationDelta ?? 0)}` : ''}</span>
+            </div>
+            {isHost ? (
+              <div className="lyrics-calibration" aria-label="Lyrics timing calibration">
+                <button onClick={() => onLyricsOffsetChange(lyricsOffsetMs - 5000)} title="Move lyrics 5 seconds earlier">−5s</button>
+                <button onClick={() => onLyricsOffsetChange(lyricsOffsetMs - 250)} title="Move lyrics 0.25 seconds earlier">−.25</button>
+                <button className="lyrics-reset" onClick={() => onLyricsOffsetChange(0)} title="Reset lyrics timing"><RotateCcw size={13}/></button>
+                <button onClick={() => onLyricsOffsetChange(lyricsOffsetMs + 250)} title="Delay lyrics 0.25 seconds">+.25</button>
+                <button onClick={() => onLyricsOffsetChange(lyricsOffsetMs + 5000)} title="Delay lyrics 5 seconds">+5s</button>
+              </div>
+            ) : (
+              <span className="lyrics-shared-note">Host calibration applies to everyone</span>
+            )}
+          </div>
+        )}
+
+        <div className="lyrics-window" ref={lyricsWindowRef}>
           {!track && <FeatureEmpty icon={<Music2/>} title="No track playing" copy="Lyrics will appear here when the host starts a song." />}
-          {track && lyricsLoading && <FeatureEmpty icon={<LoaderCircle className="spin"/>} title="Finding lyrics" copy="Matching this track with a lyrics source…" />}
+          {track && lyricsLoading && <FeatureEmpty icon={<LoaderCircle className="spin"/>} title="Finding lyrics" copy="Matching the YouTube result against multiple track/artist variants…" />}
           {track && !lyricsLoading && lyricsError && <FeatureEmpty icon={<BookOpenText/>} title="Lyrics unavailable" copy={lyricsError} />}
           {track && !lyricsLoading && !lyricsError && lyrics?.instrumental && <FeatureEmpty icon={<Music2/>} title="Instrumental track" copy="No vocal lyrics are expected for this track." />}
-          {track && !lyricsLoading && !lyricsError && lyrics?.found === false && <FeatureEmpty icon={<BookOpenText/>} title="No confident match" copy="We could not safely match lyrics to this YouTube result yet." />}
+          {track && !lyricsLoading && !lyricsError && lyrics?.found === false && <FeatureEmpty icon={<BookOpenText/>} title="No confident match" copy="This source does not have a reliable match yet. Vibify already tried cleaned title, parsed artist and broad fallbacks." />}
 
           {syncedLines.length > 0 && (
             <div className="synced-lyrics" aria-live="off">
@@ -159,7 +212,7 @@ export function RoomFeatures({
             </div>
           )}
         </div>
-        {syncedLines.length > 0 && <div className="lyrics-foot">Synced to the room playback position</div>}
+        {syncedLines.length > 0 && <div className="lyrics-foot">Every device follows the same room clock · host timing correction is shared live</div>}
       </section>
 
       <section className="glass queue-panel-v2">
@@ -225,4 +278,15 @@ function parseSyncedLyrics(value: string): LyricLine[] {
       } satisfies LyricLine;
     })
     .filter((line): line is LyricLine => Boolean(line));
+}
+
+function formatOffset(offsetMs: number) {
+  if (!offsetMs) return '0.00s';
+  const seconds = offsetMs / 1000;
+  return `${seconds > 0 ? '+' : ''}${seconds.toFixed(Math.abs(seconds) >= 10 ? 1 : 2)}s delay`;
+}
+
+function formatDelta(deltaSeconds: number) {
+  const rounded = Math.abs(deltaSeconds).toFixed(Math.abs(deltaSeconds) >= 10 ? 0 : 1);
+  return `${rounded}s ${deltaSeconds > 0 ? 'longer' : 'shorter'}`;
 }
