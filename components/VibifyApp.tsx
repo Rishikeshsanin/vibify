@@ -34,6 +34,7 @@ import {
   removeQueueItem,
   reorderQueue,
   serverNow,
+  setLyricsOffset,
   setTrack,
   subscribeRoom,
   writePlayback
@@ -71,6 +72,7 @@ export function VibifyApp() {
   const [busy, setBusy] = useState(false);
   const [controlBusy, setControlBusy] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
+  const [localPlayerState, setLocalPlayerState] = useState(-1);
   const [error, setError] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -106,6 +108,7 @@ export function VibifyApp() {
   }, [roomCode]);
 
   useEffect(() => {
+    setLocalPlayerState(-1);
     if (!room?.track) {
       setDuration(0);
       setDisplayTime(0);
@@ -115,6 +118,7 @@ export function VibifyApp() {
       const d = playerRef.current?.getDuration() ?? 0;
       if (d > 0) setDuration(d);
       setDisplayTime(playerRef.current?.getCurrentTime() ?? 0);
+      setLocalPlayerState(playerRef.current?.getPlayerState() ?? -1);
     }, 300);
     return () => clearInterval(timer);
   }, [room?.track?.videoId]);
@@ -145,6 +149,7 @@ export function VibifyApp() {
     setAudioUnlocked(false);
     setAutoplayBlocked(false);
     setPlayerReady(false);
+    setLocalPlayerState(-1);
     const url = new URL(window.location.href);
     url.searchParams.set('room', code);
     history.replaceState({}, '', url);
@@ -194,6 +199,7 @@ export function VibifyApp() {
     setAudioUnlocked(false);
     setAutoplayBlocked(false);
     setPlayerReady(false);
+    setLocalPlayerState(-1);
     const url = new URL(window.location.href);
     url.searchParams.delete('room');
     history.replaceState({}, '', url.pathname);
@@ -342,6 +348,15 @@ export function VibifyApp() {
     }
   };
 
+  const changeLyricsOffset = async (offsetMs: number) => {
+    if (!isHost) return;
+    try {
+      await setLyricsOffset(roomCode, offsetMs);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update lyrics timing.');
+    }
+  };
+
   const copyInvite = async () => {
     const url = new URL(window.location.href);
     url.searchParams.set('room', roomCode);
@@ -388,6 +403,17 @@ export function VibifyApp() {
 
   const currentTime = seekDraft ?? displayTime;
   const controlsDisabled = !isHost || !room.track || !playerReady || controlBusy;
+  const actualPlaybackStatus =
+    isHost && audioUnlocked && localPlayerState === 1
+      ? 'playing'
+      : isHost && audioUnlocked && [0, 2, 5].includes(localPlayerState)
+        ? 'paused'
+        : room.playback.status;
+  const roomTimelineTime = Math.max(
+    0,
+    room.playback.position +
+      (room.playback.status === 'playing' ? Math.max(0, serverNow() - room.playback.executeAt) / 1000 : 0)
+  );
 
   return (
     <main className="room-shell v2-room-shell">
@@ -410,6 +436,7 @@ export function VibifyApp() {
                   track={room.track}
                   playback={room.playback}
                   onReadyChange={setPlayerReady}
+                  onPlayerStateChange={setLocalPlayerState}
                   onEnded={() => { void handleTrackEnded(); }}
                   onAutoplayBlocked={() => {
                     setAutoplayBlocked(true);
@@ -453,12 +480,12 @@ export function VibifyApp() {
               </div>
               <div className="transport">
                 <button disabled={controlsDisabled} onClick={() => { void sendSeek((playerRef.current?.getCurrentTime() ?? 0) - 10); }}><SkipBack/></button>
-                <button className="main-play" disabled={controlsDisabled} onClick={() => { void (room.playback.status === 'playing' ? sendPause() : sendPlay()); }}>
-                  {controlBusy ? <LoaderCircle className="spin"/> : room.playback.status === 'playing' ? <Pause/> : <Play fill="currentColor"/>}
+                <button className="main-play" disabled={controlsDisabled} onClick={() => { void (actualPlaybackStatus === 'playing' ? sendPause() : sendPlay()); }}>
+                  {controlBusy ? <LoaderCircle className="spin"/> : actualPlaybackStatus === 'playing' ? <Pause/> : <Play fill="currentColor"/>}
                 </button>
                 <button disabled={controlsDisabled} onClick={() => { void sendSeek((playerRef.current?.getCurrentTime() ?? 0) + 10); }}><SkipForward/></button>
               </div>
-              <p className="control-note">{isHost ? (playerReady ? 'You control playback for the whole room.' : 'Player is getting ready…') : `Listening with ${room.hostName} · host controls playback.`}</p>
+              <p className="control-note">{isHost ? (playerReady ? 'This bar is the room playback source of truth.' : 'Player is getting ready…') : `Listening with ${room.hostName} · host controls playback.`}</p>
             </div>
           </div>
         </section>
@@ -466,7 +493,7 @@ export function VibifyApp() {
         <aside className="side-column">
           <section className="glass sync-panel">
             <div className="panel-title"><div><span className="eyebrow">ROOM HEALTH</span><h2>In sync</h2></div><div className="sync-badge"><span/>LIVE</div></div>
-            <div className="sync-stat"><div><span>Ready for this track</span><b>{room.track ? `${readyCount}/${participants.length}` : '—'}</b></div><div><span>Your drift</span><b className={Math.abs(me?.driftMs ?? 0) > 1200 ? 'warn' : ''}>{room.playback.status === 'playing' ? `${me?.driftMs ?? 0} ms` : 'paused'}</b></div></div>
+            <div className="sync-stat"><div><span>Ready for this track</span><b>{room.track ? `${readyCount}/${participants.length}` : '—'}</b></div><div title="Drift is measured only while playback is running."><span>Live drift</span><b className={Math.abs(me?.driftMs ?? 0) > 1200 ? 'warn' : ''}>{room.playback.status === 'playing' ? `${me?.driftMs ?? 0} ms` : '—'}</b></div></div>
             <div className="member-list">
               {participants.map(participant => <ParticipantRow key={participant.uid} participant={participant} hostUid={room.hostUid} trackId={room.track?.videoId}/>) }
             </div>
@@ -474,17 +501,19 @@ export function VibifyApp() {
           </section>
 
           <section className="glass room-note">
-            <div className="note-icon"><Radio/></div><div><b>V2 playback guard</b><p>Vibify now avoids constant hard-seeks and dramatically reduces realtime drift writes, so more friends can join without every device constantly re-rendering room telemetry.</p></div>
+            <div className="note-icon"><Radio/></div><div><b>One playback clock</b><p>The host bar drives the room, and lyrics now follow that same server-synced clock on every device instead of each device guessing independently.</p></div>
           </section>
         </aside>
       </div>
 
       <RoomFeatures
         track={room.track}
-        currentTime={displayTime}
+        roomTime={roomTimelineTime}
         duration={duration}
         queue={queueItems}
         isHost={isHost}
+        lyricsOffsetMs={room.lyricsOffsetMs ?? 0}
+        onLyricsOffsetChange={offset => { void changeLyricsOffset(offset); }}
         onOpenSearch={() => setSearchOpen(true)}
         onPlay={item => { void playQueued(item); }}
         onRemove={item => { void removeQueued(item); }}
