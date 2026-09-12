@@ -7,6 +7,7 @@
 A real-time shared listening room for phones and laptops.  
 Create a room, invite friends with a 6-character code, pick a song, and keep every device on the same YouTube playback timeline.
 
+[![Release](https://img.shields.io/badge/Release-v1.0.0-c8ff42?style=for-the-badge)](CHANGELOG.md)
 [![Live Demo](https://img.shields.io/badge/Live_Demo-vibify--mu.vercel.app-c8ff42?style=for-the-badge&logo=vercel&logoColor=000)](https://vibify-mu.vercel.app)
 [![Next.js](https://img.shields.io/badge/Next.js-15-000000?style=for-the-badge&logo=nextdotjs)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -14,9 +15,22 @@ Create a room, invite friends with a 6-character code, pick a song, and keep eve
 [![YouTube](https://img.shields.io/badge/YouTube-IFrame_API-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://developers.google.com/youtube/iframe_api_reference)
 [![License: MIT](https://img.shields.io/badge/License-MIT-8c6bff?style=for-the-badge)](LICENSE)
 
-[**Try Vibify**](https://vibify-mu.vercel.app) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
+[**Try Vibify**](https://vibify-mu.vercel.app) · [V1 Release Notes](docs/V1_RELEASE.md) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
+
+---
+
+## Release status
+
+**Vibify v1.0.0 is the first public proof-of-concept release.** It proves the room, host-control, YouTube search/playback, presence, and cross-device synchronization model.
+
+Real-world testing with multiple friends also exposed an important limitation: **some sessions can still buffer or stutter depending on browser, device, network, and YouTube player behavior.** V1 is therefore being preserved as the first complete release instead of being endlessly patched.
+
+- Stable V1 snapshot: [`release/v1.0.0`](https://github.com/Rishikeshsanin/vibify/tree/release/v1.0.0)
+- Next-generation development: [`v2`](https://github.com/Rishikeshsanin/vibify/tree/v2)
+
+V2 will use the lessons from V1 to rethink the product experience and playback architecture more deeply.
 
 ---
 
@@ -42,7 +56,7 @@ executeAt
 version
 ```
 
-That keeps the experience fast, bandwidth-light, and much more stable across mobile and desktop browsers.
+That keeps the experience bandwidth-light and much more stable than transferring audio files between devices.
 
 ---
 
@@ -177,7 +191,8 @@ vibify/
 │   └── types.ts
 ├── docs/
 │   ├── ARCHITECTURE.md
-│   └── ROADMAP.md
+│   ├── ROADMAP.md
+│   └── V1_RELEASE.md
 ├── firebase.database.rules.json
 └── README.md
 ```
@@ -261,19 +276,23 @@ See [SECURITY.md](SECURITY.md) for responsible disclosure.
 
 ## Roadmap
 
-The current release proves the core shared-listening loop. Planned directions include:
+V1 is now frozen as the first proof-of-concept release. Active product exploration continues in the **`v2` branch**.
 
-- Guest-added queue
-- Voting / democratic queue mode
-- Host transfer
+Potential V2 directions include:
+
+- a redesigned, more professional room experience
+- a more resilient playback/synchronization strategy
+- guest-added queue
+- voting / democratic queue mode
+- host transfer
 - QR-code room joining
-- Better automatic buffering recovery
-- Smarter drift telemetry
-- Recently played history
-- Room reactions
-- Provider abstraction beyond YouTube
+- stronger buffering recovery
+- smarter drift telemetry
+- recently played history
+- room reactions
+- provider abstraction beyond YouTube
 - PWA / installable experience
-- Native mobile exploration for better background playback
+- native mobile exploration for better background playback
 
 See the full [roadmap](docs/ROADMAP.md).
 
@@ -305,6 +324,6 @@ Built around one simple idea:
 
 ### **one room · one song · every device**
 
-[Launch Vibify →](https://vibify-mu.vercel.app)
+[Launch Vibify V1 →](https://vibify-mu.vercel.app)
 
 </div>
