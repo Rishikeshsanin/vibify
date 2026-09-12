@@ -1,6 +1,6 @@
 {
   "name": "vibify",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "A real-time shared listening room for phones and laptops, powered by YouTube playback and Firebase room sync.",
   "author": "Rishikeshsanin",
