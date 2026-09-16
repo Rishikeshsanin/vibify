@@ -3,6 +3,7 @@ import './globals.css';
 import './v2.css';
 import './v2-fixes.css';
 import './v2-chat-controls.css';
+import './v2.1.css';
 
 export const metadata: Metadata = {
   title: 'Vibify — Listen together',
