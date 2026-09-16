@@ -31,6 +31,14 @@ export type ReactionEvent = {
   expiresAt: number;
 };
 
+export type VibePickProposal = {
+  id: string;
+  track: Track;
+  suggestedBy: string;
+  suggestedByName: string;
+  createdAt: number;
+};
+
 export type Participant = {
   uid: string;
   name: string;
@@ -43,6 +51,8 @@ export type Participant = {
   followingRoom?: boolean;
   messages?: Record<string, ChatMessage>;
   reactions?: Record<string, ReactionEvent>;
+  vibePicks?: Record<string, VibePickProposal>;
+  vibeVotes?: Record<string, boolean>;
   joinedAt?: number;
 };
 
