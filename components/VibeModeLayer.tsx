@@ -48,7 +48,11 @@ export function VibeModeLayer({ roomCode }: Props) {
         <div
           className="vibe-artwork-aura"
           aria-hidden="true"
-          style={{ backgroundImage: `url(${track.thumbnail})` }}
+          style={{
+            backgroundImage: `url(${track.thumbnail})`,
+            zIndex: 1,
+            opacity: 0.38
+          }}
         />
       )}
       <button
