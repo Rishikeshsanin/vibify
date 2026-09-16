@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { PreviewApiBridge } from '@/components/PreviewApiBridge';
 import './globals.css';
 import './v2.css';
 import './v2-fixes.css';
@@ -20,7 +21,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <PreviewApiBridge />
+        {children}
+      </body>
     </html>
   );
 }
