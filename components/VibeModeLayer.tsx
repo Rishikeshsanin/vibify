@@ -20,8 +20,19 @@ export function VibeModeLayer({ roomCode }: Props) {
   useEffect(() => {
     const stored = window.localStorage.getItem(VIBE_MODE_KEY);
     if (stored === 'off') setEnabled(false);
-    if (stored === 'on') setEnabled(true);
+    else setEnabled(true);
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('vibe-mode-on', enabled);
+    root.classList.toggle('vibe-has-track', enabled && Boolean(track));
+
+    return () => {
+      root.classList.remove('vibe-mode-on');
+      root.classList.remove('vibe-has-track');
+    };
+  }, [enabled, track?.videoId]);
 
   const toggle = () => {
     setEnabled(current => {
@@ -32,8 +43,8 @@ export function VibeModeLayer({ roomCode }: Props) {
   };
 
   return (
-    <div className={`vibe-mode-layer ${enabled ? 'vibe-mode-on' : ''}`} aria-hidden={false}>
-      {track && (
+    <div className="vibe-mode-layer">
+      {track && enabled && (
         <div
           className="vibe-artwork-aura"
           aria-hidden="true"
@@ -44,11 +55,11 @@ export function VibeModeLayer({ roomCode }: Props) {
         type="button"
         className={`vibe-mode-toggle ${enabled ? 'is-on' : ''}`}
         onClick={toggle}
-        title="Vibe Mode uses the current track thumbnail for a stable ambient room theme. It never samples the changing YouTube video frames."
+        title="Vibe Mode uses the current track artwork as a stable ambient room theme. It never follows the changing video frames."
         aria-pressed={enabled}
       >
         <Sparkles size={15}/>
-        <span>Vibe mode</span>
+        <span>{enabled ? 'Vibe mode on' : 'Vibe mode off'}</span>
         <i aria-hidden="true"/>
       </button>
     </div>
