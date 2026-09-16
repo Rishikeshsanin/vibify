@@ -2,6 +2,30 @@
 
 All notable Vibify changes will be documented here.
 
+## [2.1.0] - 2026-09-16
+
+### Vibe Picks
+
+This release keeps the Vibify 2.0 playback, lyrics, queue, chat, reactions, host controls, local guest controls, and Catch up to the vibe behavior unchanged, and adds one social feature: guest song suggestions with room voting and host approval.
+
+### Added
+
+- Guests can search for a song and suggest it to the room
+- Shared Vibe Picks board visible to the room
+- One vote per guest per suggested track, with vote toggling
+- Duplicate suggestions merge into one voting card
+- Live vote counts and voter names
+- Host-only Add to Queue, Play Now, and Pass actions
+- Strongly supported picks receive a ROOM WANTS THIS indicator
+- Voting data stays inside participant-owned Firebase paths, preserving the existing room permission model
+
+### Scope
+
+- No Vibe Mode or artwork-based ambience is included in this release
+- No existing playback/synchronization behavior was redesigned for 2.1.0
+
+---
+
 ## [1.0.0] - 2026-09-12
 
 ### First public release
