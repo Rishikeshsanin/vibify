@@ -17,7 +17,8 @@ import type {
   QueueItem,
   ReactionEvent,
   Room,
-  Track
+  Track,
+  VibePickProposal
 } from './types';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -199,6 +200,57 @@ export async function sendReaction(code: string, uid: string, name: string, emoj
 export async function removeReaction(code: string, uid: string, reactionId: string) {
   if (!db) return;
   await remove(ref(db, `rooms/${code}/participants/${uid}/reactions/${reactionId}`));
+}
+
+export async function suggestVibePick(code: string, uid: string, name: string, track: Track) {
+  if (!db) throw new Error('Firebase is not configured.');
+  const now = serverNow();
+  const proposal: VibePickProposal = {
+    id: track.videoId,
+    track,
+    suggestedBy: uid,
+    suggestedByName: name.trim().slice(0, 24) || 'Listener',
+    createdAt: now
+  };
+
+  await update(ref(db, `rooms/${code}/participants/${uid}`), {
+    [`vibePicks/${track.videoId}`]: proposal,
+    [`vibeVotes/${track.videoId}`]: true
+  });
+  return proposal;
+}
+
+export async function setVibeVote(code: string, uid: string, videoId: string, active: boolean) {
+  if (!db) throw new Error('Firebase is not configured.');
+  await set(ref(db, `rooms/${code}/participants/${uid}/vibeVotes/${videoId}`), active ? true : null);
+}
+
+export async function clearVibePick(code: string, videoId: string, participantUids: string[]) {
+  if (!db) throw new Error('Firebase is not configured.');
+  const patch: Record<string, null> = {};
+  participantUids.forEach(participantUid => {
+    patch[`participants/${participantUid}/vibePicks/${videoId}`] = null;
+    patch[`participants/${participantUid}/vibeVotes/${videoId}`] = null;
+  });
+  if (Object.keys(patch).length) await update(ref(db, `rooms/${code}`), patch);
+}
+
+export async function playTrackNow(code: string, track: Track) {
+  if (!db) throw new Error('Firebase is not configured.');
+  const roomSnap = await get(ref(db, `rooms/${code}`));
+  if (!roomSnap.exists()) throw new Error('Room not found.');
+  const room = roomSnap.val() as Room;
+  const now = serverNow();
+  await update(ref(db, `rooms/${code}`), {
+    track,
+    lyricsOffsetMs: 0,
+    playback: {
+      status: 'playing',
+      position: 0,
+      executeAt: now + 950,
+      version: (room.playback?.version ?? 0) + 1
+    }
+  });
 }
 
 export async function addToQueue(
