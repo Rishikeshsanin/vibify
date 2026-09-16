@@ -126,6 +126,11 @@ export function subscribeRoom(code: string, callback: (room: Room | null) => voi
   return onValue(ref(db, `rooms/${code}`), snap => callback(snap.exists() ? (snap.val() as Room) : null));
 }
 
+export function subscribeRoomTrack(code: string, callback: (track?: Track) => void) {
+  if (!db) return () => {};
+  return onValue(ref(db, `rooms/${code}/track`), snap => callback(snap.exists() ? (snap.val() as Track) : undefined));
+}
+
 export async function leaveRoom(code: string, uid: string) {
   if (!db) return;
   await remove(ref(db, `rooms/${code}/participants/${uid}`));
@@ -138,6 +143,24 @@ export async function setTrack(code: string, track: Track, version: number) {
     track,
     lyricsOffsetMs: 0,
     playback: { status: 'paused', position: 0, executeAt: now + 450, version: version + 1 }
+  });
+}
+
+export async function playTrackNow(code: string, track: Track) {
+  if (!db) throw new Error('Firebase is not configured.');
+  const roomSnap = await get(ref(db, `rooms/${code}`));
+  if (!roomSnap.exists()) throw new Error('Room not found.');
+  const room = roomSnap.val() as Room;
+  const now = serverNow();
+  await update(ref(db, `rooms/${code}`), {
+    track,
+    lyricsOffsetMs: 0,
+    playback: {
+      status: 'playing',
+      position: 0,
+      executeAt: now + 950,
+      version: (room.playback?.version ?? 0) + 1
+    }
   });
 }
 
